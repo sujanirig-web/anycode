@@ -208,7 +208,6 @@ describe("composeFrame", () => {
     assert.match(text, /anyroute\/anyroute/);
     assert.match(text, /hello there/);
     assert.match(text, /next question/);
-    assert.match(text, /enter send/);
   });
 
   it("places the cursor on the composer line", () => {

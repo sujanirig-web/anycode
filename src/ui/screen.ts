@@ -220,7 +220,6 @@ export function composeFrame(input: FrameInput): Frame {
   const showHeader = input.showHeader !== false;
   const bordered = width >= 34 && height >= 12;
   const headerRows = showHeader && bordered ? 2 : 0; // header line + blank spacer
-  const footerRows = bordered ? 1 : 0;
   const statusRows = bordered ? 1 : 0;
   const borderRows = bordered ? 2 : 0;
   const dividerRows = bordered ? 1 : 0;
@@ -235,15 +234,10 @@ export function composeFrame(input: FrameInput): Frame {
   const inputRows = composer.rows.length;
   const composerHeight = inputRows + borderRows;
   const bodyTop = bordered ? (showHeader ? 2 : 0) : 0;
-  let bodyHeight = height - bodyTop - composerHeight - statusRows - footerRows - dividerRows - headerRows;
+  let bodyHeight = height - bodyTop - composerHeight - statusRows - dividerRows - headerRows;
 
-  // Very short terminals: drop the status/footer before dropping transcript rows.
+  // Very short terminals: drop the status before dropping transcript rows.
   let effectiveStatus = statusRows;
-  let effectiveFooter = footerRows;
-  if (bodyHeight < 2 && effectiveFooter > 0) {
-    effectiveFooter = 0;
-    bodyHeight += 1;
-  }
   if (bodyHeight < 2 && effectiveStatus > 0) {
     effectiveStatus = 0;
     bodyHeight += 1;
@@ -286,8 +280,6 @@ export function composeFrame(input: FrameInput): Frame {
     input.usage,
   );
   lines.push(...composerLines);
-
-  if (effectiveFooter > 0) lines.push(color.gray(truncateWidth(` ${input.footer}`, width)));
 
   while (lines.length < height) lines.push("");
   const frame = lines.slice(0, height);
