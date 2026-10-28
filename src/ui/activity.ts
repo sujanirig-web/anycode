@@ -49,8 +49,8 @@ const STATUS_ICON: Record<StepStatus, string> = {
 };
 
 const STATUS_COLOR: Record<StepStatus, (s: string) => string> = {
-  running: color.blue,
-  ok: color.green,
+  running: color.gray,
+  ok: color.gray,
   warning: color.yellow,
   error: color.red,
 };

@@ -108,7 +108,7 @@ export class Renderer {
   toolStart(call: ToolCall, input: Record<string, unknown>): void {
     this.endText();
     const args = oneLine(describeCall(call, input), 140);
-    this.out.write(`${color.green("⏺")} ${color.gray(call.name)} ${color.gray(args)}\n`);
+    this.out.write(`${color.gray("⏺")} ${color.gray(call.name)} ${color.gray(args)}\n`);
   }
 
   toolEnd(call: ToolCall, content: string, isError: boolean, durationMs: number): void {

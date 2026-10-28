@@ -31,7 +31,7 @@ interface Block {
 const CODE_GUTTER = "  │ ";
 const RESULT_GUTTER = "  ⎿ ";
 const USER_PREFIX = color.green("› ");
-const TOOL_PREFIX = color.blue("⏺ ");
+const TOOL_PREFIX = color.gray("⏺ ");
 const RESULT_PREFIX = color.gray("⎿ ");
 
 function colorizeInline(line: string): string {

@@ -11,8 +11,8 @@ const TREE_ICONS = {
 };
 
 const TREE_COLORS = {
-  running: color.blue,
-  ok: color.green,
+  running: color.gray,
+  ok: color.gray,
   warning: color.yellow,
   error: color.red,
 };
