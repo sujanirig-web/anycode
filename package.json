@@ -1,0 +1,46 @@
+{
+  "name": "anycode",
+  "version": "0.1.0",
+  "description": "A small, hackable terminal AI coding agent",
+  "type": "module",
+  "bin": {
+    "anycode": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:watch": "node --import tsx --test --watch test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.check.json"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "coding-agent",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sujanirig-web/anycode.git"
+  },
+  "homepage": "https://github.com/sujanirig-web/anycode#readme",
+  "bugs": {
+    "url": "https://github.com/sujanirig-web/anycode/issues"
+  },
+  "author": "anycode contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

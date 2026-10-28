@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.anycode/sessions/
+.anycode/cache/
+.minicode/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
