@@ -346,6 +346,9 @@ export function composeFrame(input: FrameInput): Frame {
 
   for (const line of visible) lines.push(truncateWidth(` ${line}`, width));
 
+  // One blank line between transcript content and status strip/composer
+  lines.push("");
+
   // Status strip (separate from composer, no ▌ rail)
   if (input.agentStatus) {
     const statusLines = renderStatusStrip(input.agentStatus, width);
@@ -361,6 +364,7 @@ export function composeFrame(input: FrameInput): Frame {
     input.agentMode,
     input.usage,
   );
+  const composerStartRow = lines.length;
   lines.push(...composerLines);
 
   while (lines.length < height) lines.push("");
@@ -368,7 +372,6 @@ export function composeFrame(input: FrameInput): Frame {
 
   if (input.approval) return { lines: frame, bodyHeight };
 
-  const composerStartRow = bodyTop + bodyHeight + (input.agentStatus ? 1 : 0);
   const cursorRow = composerStartRow;
   const cursorCol = clamp(2 + input.composer.cursor, 0, width - 1);
   return {

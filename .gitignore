@@ -11,3 +11,5 @@ coverage/
 .DS_Store
 Thumbs.db
 preview-*.ts
+test_visual.ts
+test_narrow.ts
