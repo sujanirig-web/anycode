@@ -242,7 +242,7 @@ export class Transcript {
 
       case "tool": {
         const label = block.name ?? "tool";
-        const header = `${TOOL_PREFIX}${color.cyan(label)}`;
+        const header = `${TOOL_PREFIX}${color.gray(label)}`;
         const args = block.args ?? "";
         if (args.length === 0) return [header];
         return wrapWithHangingIndent(args, width, `${header} `, "  ");

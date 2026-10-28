@@ -70,7 +70,7 @@ export function renderCardPanel(
     const isLast = i === card.steps.length - 1;
     const treePrefix = isLast ? "└─ " : "├─ ";
     const icon = TREE_COLORS[step.status](TREE_ICONS[step.status]);
-    const name = color.cyan(step.tool);
+    const name = color.gray(step.tool);
     const detail = color.dim(step.summary);
     const timing =
       step.durationMs !== undefined && step.status !== "running"

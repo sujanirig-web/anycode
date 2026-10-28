@@ -68,7 +68,7 @@ function shortToolName(name: string): string {
 
 export function formatStep(step: Step, width: number): string {
   const icon = STATUS_COLOR[step.status](STATUS_ICON[step.status]);
-  const name = color.cyan(shortToolName(step.tool));
+  const name = color.gray(shortToolName(step.tool));
   const summary = color.dim(step.summary);
   let line = `├─ ${icon} ${name}  ${summary}`;
   if (step.durationMs !== undefined && step.status !== "running") {
