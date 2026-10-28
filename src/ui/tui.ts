@@ -645,6 +645,7 @@ export class Tui {
         this.paint();
         break;
       case "usage":
+        this.transcript.setUsage(event.usage);
         this.schedulePaint();
         break;
       case "done":

@@ -1,9 +1,9 @@
 import type { Session } from "../agent/session.js";
 import { color } from "../util/ansi.js";
-import { oneLine } from "../util/text.js";
+import { formatNumber, oneLine } from "../util/text.js";
 import { wrapText } from "../util/wrap.js";
 import { describeCall, summarizeToolResult } from "./renderer.js";
-import type { ToolCall } from "../types.js";
+import type { ToolCall, Usage } from "../types.js";
 import type { ActivityCard } from "./activity.js";
 import { renderCardPanel } from "./card.js";
 
@@ -25,6 +25,7 @@ interface Block {
   hydrated?: boolean;
   cache?: RenderCache;
   card?: ActivityCard;
+  usage?: Usage;
 }
 
 const CODE_GUTTER = "  │ ";
@@ -98,6 +99,8 @@ export class Transcript {
     return this.blocks.length === 0;
   }
 
+  private currentUsage?: Usage;
+
   clear(): void {
     this.blocks.length = 0;
   }
@@ -135,6 +138,14 @@ export class Transcript {
       return;
     }
     this.pushAssistant(delta);
+  }
+
+  setUsage(usage: Usage): void {
+    this.currentUsage = usage;
+  }
+
+  get usage(): Usage | undefined {
+    return this.currentUsage;
   }
 
   startTool(call: ToolCall, input: Record<string, unknown>): void {
@@ -213,6 +224,15 @@ export class Transcript {
       if (out.length > 0) out.push("");
       out.push(...(block.cache?.lines ?? []));
     }
+
+    // Usage metadata line: dim, right-aligned, before composer
+    if (this.currentUsage) {
+      const u = this.currentUsage;
+      const meta = `${formatNumber(u.inputTokens)} in · ${formatNumber(u.outputTokens)} out`;
+      const pad = " ".repeat(Math.max(0, width - 2 - meta.length));
+      out.push(color.dim(pad + meta));
+    }
+
     return out;
   }
 
