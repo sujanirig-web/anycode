@@ -1,3 +1,8 @@
+/*
+┌──────────────────────────────────────────────────────────────────┐
+│ test/tui.test.ts — TUI frame, palette, editor, keys, transcript   │
+└──────────────────────────────────────────────────────────────────┘
+*/
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 

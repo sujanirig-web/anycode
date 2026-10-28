@@ -1,3 +1,8 @@
+/*
+┌──────────────────────────────────────────────────────────────────┐
+│ test/cli.test.ts — CLI end-to-end, one-shot, NDJSON, help/version │
+└──────────────────────────────────────────────────────────────────┘
+*/
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";

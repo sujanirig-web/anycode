@@ -1,3 +1,8 @@
+/*
+┌──────────────────────────────────────────────────────────────────┐
+│ test/config.test.ts — config loading, provider defaults, presets   │
+└──────────────────────────────────────────────────────────────────┘
+*/
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
