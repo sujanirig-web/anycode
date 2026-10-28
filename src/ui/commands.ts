@@ -2,6 +2,7 @@ import type { PermissionBroker } from "../agent/permissions.js";
 import { Session } from "../agent/session.js";
 import { defaultModelFor, listProviders, saveProviderPreset } from "../config.js";
 import { errorMessage } from "../errors.js";
+import { color } from "../util/ansi.js";
 import { builtinTools } from "../tools/index.js";
 import { formatNumber, oneLine } from "../util/text.js";
 import type { ChatRuntime, ChatState } from "./runtime.js";
@@ -120,20 +121,22 @@ export async function handleSlashCommand(
           const marker = p.id === state.providerId ? "*" : " ";
           const base = p.baseURL ? ` · ${p.baseURL}` : "";
           const ctx = p.contextTokens ? ` · ${formatNumber(p.contextTokens)} ctx` : "";
+          const site = p.site ? `  ${color.dim(p.site)}` : "";
           sink.info(
-            `${marker} ${p.id.padEnd(14)} ${p.model}${base}${ctx}`,
+            `${marker} ${color.bold(p.id.padEnd(12))} ${color.cyan(p.model)}${base}${ctx}${site}`,
           );
         }
+        sink.info("Use /providers add <id> <model> <base-url> [key-env] [site] to add a custom provider.");
         return false;
       }
       if (action === "add") {
-        const [id, model, baseURL, keyEnv] = sub.slice(1);
+        const [id, model, baseURL, keyEnv, site] = sub.slice(1);
         if (!id || !model || !baseURL) {
-          sink.error("Usage: /providers add <id> <model> <base-url> [key-env]");
+          sink.error("Usage: /providers add <id> <model> <base-url> [key-env] [site]");
           return false;
         }
         try {
-          await host.saveProvider(id, { model, baseURL, ...(keyEnv ? { keyEnv } : {}) });
+          await host.saveProvider(id, { model, baseURL, ...(keyEnv ? { keyEnv } : {}), ...(site ? { site } : {}) });
           sink.info(`Added provider ${id} (${model})`);
         } catch (error) {
           sink.error(errorMessage(error));

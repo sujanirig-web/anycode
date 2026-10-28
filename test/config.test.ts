@@ -165,7 +165,16 @@ describe("provider presets", () => {
     assert.ok(ids.includes("anyroute"));
     for (const p of providers) {
       assert.ok(typeof p.model === "string");
+      assert.ok(typeof p.site === "string" && p.site.startsWith("http"), `${p.id} should have a site URL`);
     }
+    const anthropic = providers.find((p) => p.id === "anthropic");
+    assert.equal(anthropic?.site, "https://www.anthropic.com");
+    const openai = providers.find((p) => p.id === "openai");
+    assert.equal(openai?.site, "https://openai.com");
+    const ollama = providers.find((p) => p.id === "ollama");
+    assert.equal(ollama?.site, "https://ollama.com");
+    const anyroute = providers.find((p) => p.id === "anyroute");
+    assert.equal(anyroute?.site, "https://github.com/sujanirig-web/anycode");
   });
 
   it("resolves built-in defaults without custom presets", () => {
@@ -173,6 +182,7 @@ describe("provider presets", () => {
     assert.equal(defaults.model, "anyroute");
     assert.equal(defaults.baseURL, "http://127.0.0.1:3456/v1");
     assert.equal(defaults.contextTokens, 1_000_000);
+    assert.equal(defaults.site, "https://github.com/sujanirig-web/anycode");
   });
 
   it("resolves custom project preset overriding built-in", () => {

@@ -32,6 +32,7 @@ export interface ProviderInfo {
   baseURL?: string;
   keyEnv?: string;
   contextTokens?: number;
+  site?: string;
 }
 
 export function listProviders(): ProviderInfo[] {
@@ -41,6 +42,7 @@ export function listProviders(): ProviderInfo[] {
     baseURL: PROVIDER_DEFAULTS[id]?.baseURL,
     keyEnv: PROVIDER_DEFAULTS[id]?.keyEnv,
     contextTokens: PROVIDER_DEFAULTS[id]?.contextTokens,
+    site: PROVIDER_DEFAULTS[id]?.site,
   }));
 }
 
@@ -56,18 +58,20 @@ interface ProviderDefaults {
   keyEnv?: string;
   baseURL?: string;
   contextTokens?: number;
+  site?: string;
 }
 
 const PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
-  anthropic: { model: "claude-sonnet-4-5", keyEnv: "ANTHROPIC_API_KEY" },
-  openai: { model: "gpt-4.1", keyEnv: "OPENAI_API_KEY" },
-  "openai-compatible": { model: "", keyEnv: "OPENAI_API_KEY" },
-  ollama: { model: "qwen2.5-coder", keyEnv: undefined, baseURL: "http://localhost:11434/v1" },
+  anthropic: { model: "claude-sonnet-4-5", keyEnv: "ANTHROPIC_API_KEY", site: "https://www.anthropic.com" },
+  openai: { model: "gpt-4.1", keyEnv: "OPENAI_API_KEY", site: "https://openai.com" },
+  "openai-compatible": { model: "", keyEnv: "OPENAI_API_KEY", site: "https://platform.openai.com" },
+  ollama: { model: "qwen2.5-coder", keyEnv: undefined, baseURL: "http://localhost:11434/v1", site: "https://ollama.com" },
   anyroute: {
     model: "anyroute",
     keyEnv: "ANYROUTE_API_KEY",
     baseURL: "http://127.0.0.1:3456/v1",
     contextTokens: 1_000_000,
+    site: "https://github.com/sujanirig-web/anycode",
   },
 };
 
@@ -260,6 +264,7 @@ export async function saveProviderPreset(id: string, preset: {
   baseURL?: string;
   keyEnv?: string;
   contextTokens?: number;
+  site?: string;
 }): Promise<string> {
   const file = path.join(homeDir(), ".anycode", "config.json");
   const existing = (await readJsonFile(file)) ?? {};
