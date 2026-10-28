@@ -9,6 +9,7 @@ export const color = {
   dim: paint(2, 22),
   italic: paint(3, 23),
   underline: paint(4, 24),
+  inverse: paint(7, 27),
   red: paint(31, 39),
   green: paint(32, 39),
   yellow: paint(33, 39),

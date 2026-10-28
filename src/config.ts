@@ -14,7 +14,13 @@ export interface Config {
   autoApprove: boolean;
 }
 
-export const PROVIDER_IDS = ["anthropic", "openai", "openai-compatible", "ollama"] as const;
+export const PROVIDER_IDS = [
+  "anthropic",
+  "openai",
+  "openai-compatible",
+  "ollama",
+  "anyroute",
+] as const;
 
 export function homeDir(): string {
   return process.env.ANYCODE_HOME ?? os.homedir();
@@ -27,11 +33,24 @@ export function configPaths(cwd: string): { global: string; project: string } {
   };
 }
 
-const PROVIDER_DEFAULTS: Record<string, { model: string; keyEnv?: string; baseURL?: string }> = {
+interface ProviderDefaults {
+  model: string;
+  keyEnv?: string;
+  baseURL?: string;
+  contextTokens?: number;
+}
+
+const PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   anthropic: { model: "claude-sonnet-4-5", keyEnv: "ANTHROPIC_API_KEY" },
   openai: { model: "gpt-4.1", keyEnv: "OPENAI_API_KEY" },
   "openai-compatible": { model: "", keyEnv: "OPENAI_API_KEY" },
   ollama: { model: "qwen2.5-coder", keyEnv: undefined, baseURL: "http://localhost:11434/v1" },
+  anyroute: {
+    model: "anyroute",
+    keyEnv: "ANYROUTE_API_KEY",
+    baseURL: "http://127.0.0.1:3456/v1",
+    contextTokens: 1_000_000,
+  },
 };
 
 export function defaultModelFor(provider: string): string {
@@ -56,8 +75,10 @@ async function readJsonFile(file: string): Promise<Record<string, unknown> | und
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+  // Editors on Windows (PowerShell, Notepad) may prepend a UTF-8 BOM.
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(text) as unknown;
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("expected a JSON object");
     }
@@ -173,6 +194,7 @@ export async function loadConfig(
       overrides.contextTokens ??
       pickNumber(project, "contextTokens") ??
       pickNumber(global, "contextTokens") ??
+      PROVIDER_DEFAULTS[provider]?.contextTokens ??
       200_000,
     autoApprove:
       overrides.autoApprove ??

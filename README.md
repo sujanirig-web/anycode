@@ -1,39 +1,53 @@
 # anycode
 
-A small, hackable terminal AI coding agent. It streams responses, reads and
-edits files, runs shell commands, and persists sessions so you can pick up where
-you left off. Providers are interchangeable: Anthropic, OpenAI, any
-OpenAI-compatible endpoint, or a local Ollama server.
+A small, hackable terminal AI coding agent with a full-screen TUI. It streams
+responses, reads and edits files, runs shell commands, and persists sessions so
+you can pick up where you left off. Providers are interchangeable: Anthropic,
+OpenAI, any OpenAI-compatible endpoint, a local Ollama server, or a local
+[AnyRoute](https://github.com/sujanirig-web/anycode) gateway.
 
 Written in plain TypeScript with **no runtime dependencies** — only Node.js
-built-ins. The compiled output is a handful of ES modules.
+built-ins. The compiled output is a handful of ES modules, and the TUI is built
+directly on raw terminal input and the alternate screen buffer.
 
 ```
-› add a retry helper to src/http.ts and run the tests
+anycode v0.2.0 ───────────────────────────────── anyroute/anyroute
 
-⏺ read src/http.ts
-  ⎿ src/http.ts (lines 1-84 of 84)
-⏺ edit src/http.ts (+18 -0)
-  ⎿ Updated src/http.ts (+18 -0, 1 replacement)
-⏺ bash npm test
-  ⎿ status: exit code 0 · 34 tests passed
+  › add a retry helper to src/http.ts and run the tests
 
-Added `withRetry()` with exponential backoff and wired it into `getJson()`.
-Tests pass.
+  ⏺ read src/http.ts
+    ⎿ src/http.ts (lines 1-84 of 84)
+  ⏺ edit src/http.ts (+18 -0)
+    ⎿ Updated src/http.ts (+18 -0, 1 replacement)
+  ⏺ bash npm test
+    ⎿ status: exit code 0 · 34 tests passed
+
+  Added `withRetry()` with exponential backoff and wired it into `getJson()`.
+  Tests pass.
+
+ ⠹ thinking · 1.2s                     12,480 in · 312 out
+ ┌───────────────────────────────────────────────────────────────┐
+ │ › █                                                           │
+ └───────────────────────────────────────────────────────────────┘
+ enter send · ctrl+j newline · /help · ctrl+d quit · ctrl+o details
 ```
 
 ## Features
 
+- **Full-screen TUI** — alternate screen buffer, scrollable transcript, inline
+  markdown/code rendering, a multi-line composer with history, live token/status
+  line, tool approvals as in-frame prompts, and a diff-based painter. Falls back
+  to a line REPL with `--no-tui` or when stdout is not a TTY.
 - **Provider-agnostic** — Anthropic Messages API, OpenAI Chat Completions, any
-  OpenAI-compatible gateway, or Ollama. Streaming everywhere, with retries on
-  429/5xx.
+  OpenAI-compatible gateway, Ollama, or a local AnyRoute gateway. Streaming
+  everywhere, with retries on 429/5xx.
 - **Useful tools** — `read`, `write`, `edit`, `bash`, `glob`, `grep`, with
   path safety, binary detection, output truncation, and recovery hints.
 - **Approval gates** — writes, edits, and shell commands ask first. Approve once,
   always for the session, or disable prompts with `--yolo`.
 - **Sessions** — every turn is saved to `.anycode/sessions/<id>.json`. Resume
   with `--continue`, `--session <id>`, or `anycode resume`.
-- **Interactive REPL and one-shot mode** — slash commands (`/model`, `/provider`,
+- **Interactive and one-shot modes** — slash commands (`/model`, `/provider`,
   `/resume`, `/usage`, `/yolo`, …), Ctrl+C interruption, and piping.
 - **NDJSON event stream** — `--json` emits every agent event as JSON lines for
   scripting, UIs, or tests.
@@ -70,7 +84,8 @@ npm run dev -- "explain this repository"
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 
-anycode                              # interactive REPL
+anycode                              # full-screen TUI
+anycode --no-tui                     # plain line REPL
 anycode "add a health check endpoint" # one task, then exit
 anycode run "fix the failing test"    # explicit form
 ```
@@ -98,10 +113,31 @@ ollama pull qwen2.5-coder
 anycode -p ollama -m qwen2.5-coder "fix the type errors"
 ```
 
+AnyRoute (local gateway, no key needed):
+
+```bash
+anyroute serve                       # starts http://127.0.0.1:3456
+anycode -p anyroute -m anyroute "fix the type errors"
+
+# Pick a routed upstream model explicitly:
+anycode -p anyroute -m gemini/gemini-flash-lite-latest "review src/agent.ts"
+```
+
+AnyRoute is OpenAI-compatible, so it can also be used through
+`-p openai-compatible --base-url http://127.0.0.1:3456/v1`. Model ids depend on
+the gateway configuration (`anyroute`, `auto`, `free`, `gemini`, or a specific
+`gemini/...` id). Set `ANYROUTE_API_KEY` only if the gateway requires auth.
+
+To make AnyRoute the default provider, put this in `~/.anycode/config.json`:
+
+```json
+{ "provider": "anyroute", "model": "anyroute" }
+```
+
 ## CLI
 
 ```
-anycode                     Start the interactive REPL
+anycode                     Start the interactive TUI
 anycode "<task>"            Run one task and exit
 anycode run "<task>"        Same, explicit form
 anycode resume [id]         Resume a session (default: most recent)
@@ -114,7 +150,7 @@ Options:
 | Flag | Description |
 | --- | --- |
 | `-m, --model <name>` | Model to use |
-| `-p, --provider <id>` | `anthropic`, `openai`, `openai-compatible`, `ollama` |
+| `-p, --provider <id>` | `anthropic`, `openai`, `openai-compatible`, `ollama`, `anyroute` |
 | `--base-url <url>` | Override the provider base URL |
 | `--api-key <key>` | Override the API key (prefer environment variables) |
 | `-s, --session <id>` | Resume a specific session |
@@ -122,10 +158,15 @@ Options:
 | `-y, --yolo` | Auto-approve write, edit, and bash |
 | `--json` | Stream events as newline-delimited JSON |
 | `--cwd <dir>` | Run against another working directory |
+| `--no-tui` | Use the plain line REPL instead of the full-screen UI |
 | `--max-steps <n>` | Maximum agent steps per turn (default 50) |
 | `--max-tokens <n>` | Maximum output tokens per model call |
 | `--no-color` | Disable ANSI colors |
 | `-h, --help` / `-v, --version` | Help / version |
+
+Set `ANYCODE_NO_TUI=1` to force the line REPL without a flag. The TUI is used
+automatically when both stdin and stdout are TTYs and a prompt argument is not
+given.
 
 ### JSON event stream
 
@@ -141,7 +182,36 @@ Options:
 {"type":"done","steps":1,"usage":{"...":"..."},"aborted":false}
 ```
 
-### REPL commands
+### Interactive UI
+
+The full-screen TUI opens on a terminal when no prompt is given. It keeps the
+transcript in the scrollback region, streams assistant text and tool output live,
+and shows the composer, status line and footer at the bottom.
+
+Keys:
+
+| Key | Action |
+| --- | --- |
+| `enter` | Send the prompt |
+| `ctrl+j` (or `alt+enter`, `ctrl+enter`) | Insert a newline |
+| `esc` | Clear the composer |
+| `↑` / `↓` | Move between lines, or recall prompt history |
+| `ctrl+a` / `ctrl+e` | Start / end of line |
+| `ctrl+←` / `ctrl+→` | Move by word |
+| `ctrl+k` / `ctrl+u` / `ctrl+w` | Kill to end / start / previous word |
+| `ctrl+o` | Expand or collapse tool output |
+| `pageup` / `pagedown` | Scroll the transcript |
+| `ctrl+c` | Interrupt a running turn; twice at the prompt exits |
+| `ctrl+d` | Quit |
+| `ctrl+l` | Repaint the screen |
+
+While a tool asks for approval, `y` allows once, `a` always for the session, and
+`n` or `esc` denies.
+
+The line REPL (`--no-tui` or `ANYCODE_NO_TUI=1`) supports the same commands, `\`
+line continuations, and Ctrl+C interruption.
+
+Slash commands:
 
 ```
 /help              Show help
@@ -155,9 +225,6 @@ Options:
 /tools             List available tools
 /exit              Quit (alias: /quit)
 ```
-
-`\` at the end of a line continues the prompt. Ctrl+C interrupts a running turn;
-press it twice at the prompt to exit.
 
 ## Tools and permissions
 
@@ -185,7 +252,8 @@ Precedence, highest first:
 1. CLI flags
 2. Environment variables (`ANYCODE_PROVIDER`, `ANYCODE_MODEL`,
    `ANYCODE_BASE_URL`, `ANYCODE_API_KEY`)
-3. Provider-specific key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+3. Provider-specific key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+   `ANYROUTE_API_KEY`)
 4. `<cwd>/.anycode/config.json`
 5. `~/.anycode/config.json`
 6. Built-in defaults
@@ -265,7 +333,7 @@ Providers only need to implement `Provider.stream(request)` and yield
 ```
 src/
   cli.ts              executable bootstrap (sets NO_COLOR before imports)
-  main.ts             CLI parsing, one-shot/JSON modes, REPL wiring
+  main.ts             CLI parsing, one-shot/JSON modes, TUI/REPL wiring
   config.ts           layered config loading
   types.ts            messages, usage, provider contracts
   errors.ts           UserError, ToolError, ProviderError, abort detection
@@ -277,18 +345,32 @@ src/
   llm/
     http.ts           streaming POST with retries
     anthropic.ts      Anthropic Messages provider
-    openai.ts         OpenAI Chat Completions provider
+    openai.ts         OpenAI Chat Completions provider (also AnyRoute/Ollama)
     mock.ts           deterministic provider for tests
   tools/              read, write, edit, bash, glob, grep
-  ui/                 renderer, REPL, approval prompt
-  util/               ANSI, diff, glob, SSE, spinner, text
-test/                 unit, provider, agent, and CLI end-to-end tests
+  ui/
+    tui.ts            full-screen runtime: alt screen, keys, streaming, approvals
+    screen.ts         pure frame layout, composer, cursor composition
+    transcript.ts     transcript blocks, markdown-lite, tool rendering
+    editor.ts         multi-line composer with history and kill bindings
+    keys.ts           incremental key/paste parser for raw terminal input
+    commands.ts       shared slash-command handler
+    runtime.ts        chat state shared by the TUI and REPL
+    repl.ts           line REPL fallback
+    renderer.ts       streaming renderer used by the REPL
+  util/               ANSI, diff, glob, SSE, spinner, text, width, wrap
+test/                 unit, provider, agent, TUI, and CLI end-to-end tests
 ```
 
 The loop is deliberately small: send history → stream text/tool calls → execute
 tools → append results → repeat until the model stops, the step limit is hit, or
 the user aborts. Every provider is converted into the same event stream, so the
 agent never branches on vendor.
+
+The UI is layered the same way: `tui.ts` owns the terminal lifecycle and input,
+`screen.ts` composes a deterministic frame from plain data, and `transcript.ts`
+renders cached blocks. Because frames are pure, layout and scrolling are covered
+by tests without a pseudo-terminal.
 
 ### Adding a tool
 

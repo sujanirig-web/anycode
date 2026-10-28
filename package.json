@@ -1,6 +1,6 @@
 {
   "name": "anycode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A small, hackable terminal AI coding agent",
   "type": "module",
   "bin": {

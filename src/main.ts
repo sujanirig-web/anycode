@@ -16,6 +16,7 @@ import { oneLine } from "./util/text.js";
 import { createAskPermission } from "./ui/ask.js";
 import { Renderer } from "./ui/renderer.js";
 import { runRepl, type ReplRuntime } from "./ui/repl.js";
+import { runTui } from "./ui/tui.js";
 import { NAME, VERSION } from "./version.js";
 
 const OPTIONS = {
@@ -32,13 +33,14 @@ const OPTIONS = {
   "max-steps": { type: "string" },
   "max-tokens": { type: "string" },
   "no-color": { type: "boolean" },
+  "no-tui": { type: "boolean" },
   cwd: { type: "string" },
 } as const;
 
 const HELP = `${NAME} ${VERSION} — a small terminal AI coding agent
 
 Usage:
-  ${NAME}                     Start the interactive REPL
+  ${NAME}                     Start the interactive TUI
   ${NAME} "<task>"            Run one task and exit
   ${NAME} run "<task>"        Same, explicit form
   ${NAME} resume [id]         Resume a session (default: most recent)
@@ -47,7 +49,7 @@ Usage:
 
 Options:
   -m, --model <name>          Model to use
-  -p, --provider <id>         anthropic | openai | openai-compatible | ollama
+  -p, --provider <id>         anthropic | openai | openai-compatible | ollama | anyroute
       --base-url <url>        Override the provider base URL (local models, proxies)
       --api-key <key>         Override the API key (prefer environment variables)
   -s, --session <id>          Resume a specific session
@@ -55,6 +57,7 @@ Options:
   -y, --yolo                  Auto-approve write, edit and bash (no prompts)
       --json                  Stream events as newline-delimited JSON
       --cwd <dir>             Run against another working directory
+      --no-tui                Use the plain line REPL instead of the full-screen UI
       --max-steps <n>         Maximum agent steps per turn (default 50)
       --max-tokens <n>        Maximum output tokens per model call
   -h, --help                  Show this help
@@ -62,12 +65,13 @@ Options:
 
 Environment:
   ANYCODE_PROVIDER, ANYCODE_MODEL, ANYCODE_BASE_URL, ANYCODE_API_KEY
-  ANTHROPIC_API_KEY, OPENAI_API_KEY
+  ANTHROPIC_API_KEY, OPENAI_API_KEY, ANYROUTE_API_KEY
 
 Examples:
   ${NAME} "explain this codebase"
   ${NAME} -m gpt-4.1 "add tests for src/utils.ts"
   ${NAME} -p ollama -m qwen2.5-coder "fix the failing test"
+  ${NAME} -p anyroute -m anyroute "fix the failing test"
   ${NAME} --json "list the TODO comments" > events.ndjson
 
 Config files (later wins):
@@ -275,6 +279,12 @@ export async function main(argv: string[]): Promise<number> {
   const agent = built.agent;
   const effectiveConfig = built.config;
 
+  const useTui =
+    !values["no-tui"] &&
+    !process.env.ANYCODE_NO_TUI &&
+    Boolean(input.isTTY) &&
+    Boolean(output.isTTY);
+
   if (interactive || resumeInteractive) {
     const runtime: ReplRuntime = {
       cwd,
@@ -303,7 +313,7 @@ export async function main(argv: string[]): Promise<number> {
       loadSession: (id) => Session.load(cwd, id),
     };
 
-    await runRepl(runtime);
+    await (useTui ? runTui(runtime) : runRepl(runtime));
     return 0;
   }
 

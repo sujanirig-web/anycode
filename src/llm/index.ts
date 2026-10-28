@@ -42,9 +42,18 @@ export function createProvider(settings: ProviderSettings): Provider {
         ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
       });
 
+    case "anyroute":
+      return new OpenAIProvider({
+        id: "anyroute",
+        label: "AnyRoute",
+        baseURL: settings.baseURL ?? "http://127.0.0.1:3456/v1",
+        requiresApiKey: false,
+        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+      });
+
     default:
       throw new UserError(
-        `Unknown provider "${settings.id}". Use one of: anthropic, openai, openai-compatible, ollama.`,
+        `Unknown provider "${settings.id}". Use one of: anthropic, openai, openai-compatible, ollama, anyroute.`,
       );
   }
 }
