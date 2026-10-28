@@ -3,7 +3,7 @@ import type { JsonSchema } from "../types.js";
 export interface PermissionRequest {
   /** Tool name, used for the "always allow" decision. */
   tool: string;
-  kind: "bash" | "write" | "edit";
+  kind: "bash" | "write" | "edit" | "delete" | "copy" | "move" | "mkdir";
   title: string;
   detail?: string;
 }

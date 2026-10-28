@@ -73,8 +73,8 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
 - If you are blocked, state the exact blocker and the best next step instead of guessing.
 - Keep prose short. Prefer doing over explaining.`,
     `# Tool notes
-- read, glob and grep are read-only and safe to call freely.
-- write, edit and bash require user approval unless auto-approve is enabled.
+- read, list, glob and grep are read-only and safe to call freely.
+- write, edit, delete, copy, move, mkdir and bash require user approval unless auto-approve is enabled.
 - bash output includes the exit code. A non-zero exit code is information, not necessarily a failure.
 - Tool errors include a hint for recovery; adjust your approach instead of repeating the same call.`,
     `# Response style
