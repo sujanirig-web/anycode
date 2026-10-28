@@ -690,12 +690,11 @@ export class Tui {
       lines = [...palette, ...lines];
     }
 
-    const header = `${this.state.providerId}/${this.state.model} · ~/projects`;
     return composeFrame({
       width,
       height,
-      header,
-      showHeader: true,
+      header: "",
+      showHeader: false,
       transcript: lines,
       scroll: this.scroll,
       composer: { text: this.editor.text, cursor: this.editor.cursor },
