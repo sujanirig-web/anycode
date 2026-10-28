@@ -3,7 +3,7 @@ import type { AgentEvent } from "../agent/agent.js";
 import type { PermissionAnswer } from "../agent/permissions.js";
 import { errorMessage } from "../errors.js";
 import type { PermissionRequest } from "../tools/types.js";
-import { formatNumber } from "../util/text.js";
+
 import { color } from "../util/ansi.js";
 import { NAME, VERSION } from "../version.js";
 import { handleSlashCommand, type CommandItem, COMMANDS } from "./commands.js";
@@ -572,10 +572,6 @@ export class Tui {
     this.transcript.pushUser(text);
     this.scroll = 0;
 
-    const intent = text.length > 60 ? text.slice(0, 57) + "…" : text;
-    const card = this.tracker.startCard(intent);
-    this.transcript.updateCurrentActivity(card);
-
     const controller = new AbortController();
     this.busy = { controller, label: "thinking", startedAt: Date.now() };
     this.tick = setInterval(() => this.paint(), TICK_MS);
@@ -686,9 +682,7 @@ export class Tui {
   }
 
   private statusRight(): string {
-    const usage = this.state.session.usage;
-    const tokens = `${formatNumber(usage.inputTokens)} in · ${formatNumber(usage.outputTokens)} out`;
-    return this.scroll > 0 ? `${tokens} · ↑ ${this.scroll}` : tokens;
+    return this.scroll > 0 ? `↑ ${this.scroll}` : "";
   }
 
   private compose(width: number, height: number, lines: string[]): Frame {
@@ -720,7 +714,8 @@ export class Tui {
       footer: this.approval
         ? "y allow once · a always · n / esc deny"
         : footerFor(width),
-    });
+        usage: this.state.session.usage,
+      });
   }
 
   private paint(): void {

@@ -1,6 +1,6 @@
 import type { Session } from "../agent/session.js";
 import { color } from "../util/ansi.js";
-import { formatNumber, oneLine } from "../util/text.js";
+import { oneLine } from "../util/text.js";
 import { wrapText } from "../util/wrap.js";
 import { describeCall, summarizeToolResult } from "./renderer.js";
 import type { ToolCall, Usage } from "../types.js";
@@ -225,14 +225,6 @@ export class Transcript {
       out.push(...(block.cache?.lines ?? []));
     }
 
-    // Usage metadata line: dim, right-aligned, before composer
-    if (this.currentUsage) {
-      const u = this.currentUsage;
-      const meta = `${formatNumber(u.inputTokens)} in · ${formatNumber(u.outputTokens)} out`;
-      const pad = " ".repeat(Math.max(0, width - 2 - meta.length));
-      out.push(color.dim(pad + meta));
-    }
-
     return out;
   }
 
@@ -258,7 +250,7 @@ export class Transcript {
 
       case "activity": {
         const card = block.card;
-        if (!card) return [];
+        if (!card || card.steps.length === 0) return [];
         return renderCardPanel(card, Math.max(10, width - 2));
       }
 

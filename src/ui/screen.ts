@@ -23,6 +23,8 @@ export interface FrameInput {
   composer: { text: string; cursor: number };
   approval?: ApprovalView;
   footer: string;
+  /** Token usage for compact display in composer context row. */
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface Frame {
@@ -40,6 +42,7 @@ function renderCavehoundComposer(
   composer: { text: string; cursor: number },
   width: number,
   mode: "idle" | "typing" | "working",
+  usage?: { inputTokens: number; outputTokens: number },
 ): string[] {
   const innerWidth = Math.max(1, width - 4);
   const rail = color.gray("▌");
@@ -66,8 +69,11 @@ function renderCavehoundComposer(
     lines.push(`${rail} ${attach} ${dot} ${commands} ${dot2} ${run}`);
   }
 
-  // Line 3: context (right-aligned)
-  const context = color.gray("anyroute · ~/projects");
+  // Line 3: context (right-aligned) with usage
+  const provider = color.gray("anyroute");
+  const cwd = color.gray("~/projects");
+  const usagePart = usage ? color.gray(` · ${formatUsage(usage)}`) : "";
+  const context = `${provider} · ${cwd}${usagePart}`;
   lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(context) - 2))}${context}`);
 
   // Line 4: shortcuts (right-aligned)
@@ -91,6 +97,12 @@ function headerLine(left: string, right: string, width: number): string {
   const available = Math.max(0, width - stringWidth(rightText) - 2);
   const leftText = padToWidth(truncateWidth(left, available), available);
   return color.bold(color.magenta(truncateWidth(`${leftText} ${rightText} `, width)));
+}
+
+/** Format token usage compactly: under 1k shows raw, 1k+ uses k suffix. */
+function formatUsage(usage: { inputTokens: number; outputTokens: number }): string {
+  const fmt = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  return `${fmt(usage.inputTokens)} in · ${fmt(usage.outputTokens)} out`;
 }
 
 function sideBySide(left: string, right: string, width: number): string {
@@ -252,6 +264,7 @@ export function composeFrame(input: FrameInput): Frame {
     input.composer,
     input.width,
     input.approval ? "working" : input.composer.text.length > 0 ? "typing" : "idle",
+    input.usage,
   );
   lines.push(...composerLines);
 

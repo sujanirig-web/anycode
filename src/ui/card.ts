@@ -17,7 +17,7 @@ const TREE_COLORS = {
   error: color.red,
 };
 
-const BORDER_COLOR = color.blue;
+const BORDER_COLOR = color.gray;
 
 /**
  * Render a single activity card as a bordered panel with tree steps.
@@ -29,6 +29,9 @@ export function renderCardPanel(
   width: number,
   selectedStepIndex: number | undefined = undefined,
 ): string[] {
+  // Guard: never render an empty card (no tool steps)
+  if (!card.steps || card.steps.length === 0) return [];
+
   const innerWidth = Math.max(10, width - 4); // minus left/right border + padding
   const lines: string[] = [];
   const borderLeft = BORDER_COLOR("│");

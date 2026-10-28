@@ -68,6 +68,36 @@ export function formatStep(step: Step, width: number): string {
   return truncateWidth(line, width);
 }
 
+/** Generate a human-readable intent title from a tool call. Never uses the user's message. */
+export function intentForTool(call: ToolCall, input: Record<string, unknown>): string {
+  const summary = describeCall(call, input);
+  const tool = call.name;
+
+  const intents: Record<string, string> = {
+    bash: "Running shell command",
+    read: "Reading file",
+    write: "Writing file",
+    edit: "Editing file",
+    glob: "Searching files",
+    grep: "Searching code",
+    list: "Listing directory",
+    delete: "Deleting file",
+    copy: "Copying file",
+    move: "Moving file",
+    mkdir: "Creating directory",
+  };
+
+  const base = intents[tool] ?? "Running tool";
+
+  // If we have a meaningful summary, incorporate it
+  if (summary && summary.length > 0) {
+    const short = summary.length > 40 ? summary.slice(0, 37) + "…" : summary;
+    return `${base}: "${short}"`;
+  }
+
+  return base;
+}
+
 function truncateWidth(text: string, width: number): string {
   // Use visible length for truncation (ANSI stripped)
   const visible = text.replace(/\u001b\[[0-9;]*m/g, "");
@@ -128,10 +158,12 @@ export class ActivityTracker {
     return card;
   }
 
-  /** Add a step to the current card. */
+  /** Add a step to the current card. Creates a card if none exists yet. */
   addStep(call: ToolCall, input: Record<string, unknown>): Step {
-    const card = this.currentCard;
-    if (!card) throw new Error("No active activity card");
+    let card = this.currentCard;
+    if (!card) {
+      card = this.startCard(intentForTool(call, input));
+    }
 
     const summary = describeCall(call, input);
     const step: Step = {
