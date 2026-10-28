@@ -167,10 +167,8 @@ export class Transcript {
 
   welcome(options: { cwd: string; provider: string; model: string; autoApprove: boolean }): void {
     const modelText = `${options.provider}/${options.model}${options.autoApprove ? "  (auto-approve)" : ""}`;
-    const cwdText = options.cwd.length > 45 ? `…${options.cwd.slice(-42)}` : options.cwd;
     const lines = [
       `${color.bold(color.magenta("model:"))}  ${color.white(modelText)}`,
-      `${color.dim(color.gray("cwd:"))}  ${color.dim(cwdText)}`,
     ];
     this.blocks.push({ kind: "info", text: lines.join("\n") });
   }
