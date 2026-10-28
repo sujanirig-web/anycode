@@ -25,6 +25,10 @@ export interface FrameInput {
   footer: string;
   /** Token usage for compact display in composer context row. */
   usage?: { inputTokens: number; outputTokens: number };
+  /** Agent name for composer placeholder (e.g. "Cavehound", "Atlas"). */
+  agentName?: string;
+  /** Current agent mode for placeholder derivation. */
+  agentMode: "idle" | "running" | "shell" | "plan" | "file-picker";
 }
 
 export interface Frame {
@@ -37,18 +41,40 @@ export interface Frame {
 const MIN_WIDTH = 20;
 const MIN_HEIGHT = 6;
 
+/** Derive the composer placeholder from application state. */
+function derivePlaceholder(
+  composer: { text: string; cursor: number },
+  agentName: string | undefined,
+  agentMode: "idle" | "running" | "shell" | "plan" | "file-picker",
+): string {
+  if (composer.text.length > 0) return composer.text;
+
+  if (agentMode === "file-picker") return "Search files…";
+  if (agentMode === "running") return "Type to queue your next instruction…";
+  if (agentMode === "shell") return "Run a shell command…";
+  if (agentMode === "plan") return "Describe what to plan…";
+  if (agentName) return `Ask ${agentName}…`;
+  return "Type a message…";
+}
+
+function hintForMode(mode: "idle" | "running" | "shell" | "plan" | "file-picker"): string {
+  if (mode === "running") return "Tab queue · Esc interrupt";
+  return "attach · commands · run";
+}
+
 /** Render the Cavehound bottom composer with left accent rail and right-aligned context. */
 function renderCavehoundComposer(
   composer: { text: string; cursor: number },
   width: number,
-  mode: "idle" | "typing" | "working",
+  agentName: string | undefined,
+  agentMode: "idle" | "running" | "shell" | "plan" | "file-picker",
   usage?: { inputTokens: number; outputTokens: number },
 ): string[] {
   const innerWidth = Math.max(1, width - 4);
   const rail = color.gray("▌");
   const lines: string[] = [];
 
-  const placeholder = "ask cavehound";
+  const placeholder = derivePlaceholder(composer, agentName, agentMode);
   const text = composer.text.length > 0 ? composer.text : placeholder;
   const textColor = composer.text.length > 0 ? color.white : color.gray;
   const cursorCol = Math.min(composer.cursor, text.length);
@@ -58,16 +84,8 @@ function renderCavehoundComposer(
   lines.push(`${rail} ${textColor(visibleText)}`);
 
   // Line 2: rail + hint row
-  if (mode === "working") {
-    lines.push(`${rail} ${color.dim("Tab queue · Esc interrupt")}`);
-  } else {
-    const attach = color.dim("attach");
-    const dot = color.dim("·");
-    const commands = color.dim("commands");
-    const dot2 = color.dim("·");
-    const run = color.dim("run");
-    lines.push(`${rail} ${attach} ${dot} ${commands} ${dot2} ${run}`);
-  }
+  const hint = hintForMode(agentMode);
+  lines.push(`${rail} ${color.dim(hint)}`);
 
   // Line 3: context (right-aligned) with usage
   const provider = color.gray("anyroute");
@@ -263,7 +281,8 @@ export function composeFrame(input: FrameInput): Frame {
   const composerLines = renderCavehoundComposer(
     input.composer,
     input.width,
-    input.approval ? "working" : input.composer.text.length > 0 ? "typing" : "idle",
+    input.agentName,
+    input.agentMode,
     input.usage,
   );
   lines.push(...composerLines);

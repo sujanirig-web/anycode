@@ -715,6 +715,8 @@ export class Tui {
         ? "y allow once · a always · n / esc deny"
         : footerFor(width),
         usage: this.state.session.usage,
+        agentName: "Cavehound",
+        agentMode: this.busy ? "running" : "idle",
       });
   }
 

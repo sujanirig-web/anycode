@@ -192,6 +192,8 @@ describe("composeFrame", () => {
       statusRight: "12 in · 4 out",
       composer: { text: "next question", cursor: 13 },
       footer: "enter send · ctrl+d quit",
+      agentName: "Cavehound",
+      agentMode: "idle",
       ...overrides,
     });
   }
@@ -260,5 +262,76 @@ describe("composeFrame", () => {
     const many = Array.from({ length: 100 }, (_value, index) => `line ${index}`);
     const result = frame({ transcript: many, scroll: 20 });
     assert.match(result.lines.map(plain).join("\n"), /20 lines below/);
+  });
+
+  it("derives placeholder from agent name when idle", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Ask Cavehound…/);
+  });
+
+  it("derives placeholder from custom agent name", () => {
+    const result = frame({
+      agentName: "Atlas",
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Ask Atlas…/);
+  });
+
+  it("shows 'Type a message…' when no agent name", () => {
+    const result = frame({
+      agentName: undefined,
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Type a message…/);
+  });
+
+  it("shows 'Type to queue your next instruction…' when running", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Type to queue your next instruction…/);
+  });
+
+  it("shows 'Run a shell command…' in shell mode", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "shell",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Run a shell command…/);
+  });
+
+  it("shows 'Search files…' in file picker mode", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "file-picker",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /Search files…/);
+  });
+
+  it("shows typed text instead of placeholder", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "hello there", cursor: 11 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /hello there/);
+    assert.match(text, /▌ hello there/);
   });
 });
