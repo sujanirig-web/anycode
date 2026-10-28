@@ -13,6 +13,8 @@ import { composeFrame, type Frame } from "./screen.js";
 import { Transcript } from "./transcript.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/** Buffer/loader bars that pulse to show the model is actively thinking. */
+const BUFFER = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"];
 const PASTE_ON = "\u001b[?2004h";
 const PASTE_OFF = "\u001b[?2004l";
 const ALT_ON = "\u001b[?1049h";
@@ -20,6 +22,7 @@ const ALT_OFF = "\u001b[?1049l";
 const CURSOR_ON = "\u001b[?25h";
 const CURSOR_OFF = "\u001b[?25l";
 const CTRL_C_WINDOW_MS = 1500;
+const TICK_MS = 50;
 
 const FOOTER_HINTS = [
   "enter send",
@@ -390,7 +393,7 @@ export class Tui {
 
     const controller = new AbortController();
     this.busy = { controller, label: "thinking", startedAt: Date.now() };
-    this.tick = setInterval(() => this.paint(), 120);
+    this.tick = setInterval(() => this.paint(), TICK_MS);
     this.paint();
 
     try {
@@ -477,7 +480,9 @@ export class Tui {
     if (this.busy) {
       const elapsed = (Date.now() - this.busy.startedAt) / 1000;
       const frame = SPINNER[Math.floor(elapsed * 10) % SPINNER.length] ?? "⠋";
-      return `${frame} ${this.busy.label} · ${elapsed.toFixed(elapsed >= 10 ? 0 : 1)}s`;
+      const buffer = BUFFER[Math.floor(elapsed * 20) % BUFFER.length] ?? "█";
+      const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
+      return `${buffer} ${frame} ${this.busy.label} · ${seconds}s`;
     }
     return `ready · session ${this.state.session.id.slice(-6)}`;
   }

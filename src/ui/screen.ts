@@ -40,8 +40,8 @@ function clamp(value: number, min: number, max: number): number {
 function headerLine(left: string, right: string, width: number): string {
   const rightText = truncateWidth(right, Math.max(0, width - 14));
   const available = Math.max(0, width - stringWidth(rightText) - 2);
-  const leftText = padToWidth(truncateWidth(` ${left}`, available), available);
-  return color.inverse(truncateWidth(`${leftText} ${rightText} `, width));
+  const leftText = padToWidth(truncateWidth(left, available), available);
+  return color.bold(truncateWidth(`${leftText} ${rightText} `, width));
 }
 
 function sideBySide(left: string, right: string, width: number): string {
@@ -122,6 +122,7 @@ export function composeFrame(input: FrameInput): Frame {
   const footerRows = bordered ? 1 : 0;
   const statusRows = bordered ? 1 : 0;
   const borderRows = bordered ? 2 : 0;
+  const dividerRows = bordered ? 1 : 0;
 
   const maxInputRows = Math.max(1, bordered ? height - 8 : 3);
   const textWidth = bordered ? width - 5 : width - 2;
@@ -143,9 +144,9 @@ export function composeFrame(input: FrameInput): Frame {
     : layoutComposer(input.composer, textWidth, maxInputRows, prefix, continuation);
 
   const inputRows = composer.rows.length;
-  let composerHeight = inputRows + borderRows;
+  const composerHeight = inputRows + borderRows;
   const bodyTop = bordered ? 2 : 1;
-  let bodyHeight = height - bodyTop - composerHeight - statusRows - footerRows;
+  let bodyHeight = height - bodyTop - composerHeight - statusRows - footerRows - dividerRows;
 
   // Very short terminals: drop the status/footer before dropping transcript rows.
   let effectiveStatus = statusRows;
@@ -187,6 +188,8 @@ export function composeFrame(input: FrameInput): Frame {
   }
 
   const boxed = boxLines(composer.rows, width, "╭", "╮", bordered);
+  // Thin divider between transcript body and the composer input area.
+  if (bordered) lines.push(color.dim("├" + "─".repeat(width - 2) + "┤"));
   lines.push(...boxed);
 
   if (effectiveFooter > 0) lines.push(color.dim(truncateWidth(` ${input.footer}`, width)));
@@ -197,7 +200,7 @@ export function composeFrame(input: FrameInput): Frame {
   if (input.approval) return { lines: frame, bodyHeight };
 
   const cursorRow =
-    bodyTop + bodyHeight + effectiveStatus + (bordered ? 1 : 0) + composer.cursorRow;
+    bodyTop + bodyHeight + effectiveStatus + (bordered ? 2 : 1) + composer.cursorRow;
   const cursorCol = (bordered ? 1 : 0) + composer.cursorCol;
   return {
     lines: frame,
