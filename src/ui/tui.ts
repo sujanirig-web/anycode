@@ -492,16 +492,13 @@ export class Tui {
       const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
       return `${buffer} ${frame} ${this.busy.label} · ${seconds}s`;
     }
-    return "ready";
+    return "";
   }
 
   private statusRight(): string {
     const usage = this.state.session.usage;
     const tokens = `${formatNumber(usage.inputTokens)} in · ${formatNumber(usage.outputTokens)} out`;
-    const model = `${this.state.providerId}/${this.state.model}`;
-    return this.scroll > 0
-      ? `${tokens} · ${model} · ↑ ${this.scroll}`
-      : `${tokens} · ${model}`;
+    return this.scroll > 0 ? `${tokens} · ↑ ${this.scroll}` : tokens;
   }
 
   private compose(width: number, height: number, lines: string[]): Frame {

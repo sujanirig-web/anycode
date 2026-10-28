@@ -166,13 +166,11 @@ export class Transcript {
   }
 
   welcome(options: { cwd: string; provider: string; model: string; autoApprove: boolean }): void {
-    const label = color.bold(color.gray("anycode"));
     const modelText = `${options.provider}/${options.model}${options.autoApprove ? "  (auto-approve)" : ""}`;
-    const cwdText = options.cwd.length > 40 ? `…${options.cwd.slice(-37)}` : options.cwd;
+    const cwdText = options.cwd.length > 45 ? `…${options.cwd.slice(-42)}` : options.cwd;
     const lines = [
-      `${color.blue(label)}  ${color.dim(modelText)}`,
-      `${color.dim("cwd  ")}${color.gray(cwdText)}`,
-      color.dim("Type your request, or /help for commands."),
+      `${color.bold(color.magenta("model:"))}  ${color.white(modelText)}`,
+      `${color.dim(color.gray("cwd:"))}  ${color.dim(cwdText)}`,
     ];
     this.blocks.push({ kind: "info", text: lines.join("\n") });
   }
