@@ -17,11 +17,14 @@ export interface Step {
   error?: string;
 }
 
-export interface ActivityPermission {
+export interface ShellApproval {
   tool: string;
-  command: string;
-  cwd?: string;
-  risk?: string;
+  explanation: string;
+  reason: string;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH";
+  risk: string;
+  primaryCommand: string;
+  fullCommand: string;
 }
 
 export interface ActivityCard {
@@ -30,7 +33,7 @@ export interface ActivityCard {
   status: StepStatus;
   steps: Step[];
   expanded: boolean;
-  permission?: ActivityPermission;
+  permission?: ShellApproval;
 }
 
 export type ChatMessage =
@@ -52,11 +55,17 @@ const STATUS_COLOR: Record<StepStatus, (s: string) => string> = {
   error: color.red,
 };
 
+const STATUS_BORDER: Record<StepStatus, (s: string) => string> = {
+  running: color.gray,
+  ok: color.gray,
+  warning: color.yellow,
+  error: color.red,
+};
+
 function shortToolName(name: string): string {
   return name.length > 12 ? `${name.slice(0, 11)}…` : name;
 }
 
-/** Format a step summary for display in a card tree line. */
 export function formatStep(step: Step, width: number): string {
   const icon = STATUS_COLOR[step.status](STATUS_ICON[step.status]);
   const name = color.cyan(shortToolName(step.tool));
@@ -68,7 +77,6 @@ export function formatStep(step: Step, width: number): string {
   return truncateWidth(line, width);
 }
 
-/** Generate a human-readable intent title from a tool call. Never uses the user's message. */
 export function intentForTool(call: ToolCall, input: Record<string, unknown>): string {
   const summary = describeCall(call, input);
   const tool = call.name;
@@ -89,7 +97,6 @@ export function intentForTool(call: ToolCall, input: Record<string, unknown>): s
 
   const base = intents[tool] ?? "Running tool";
 
-  // If we have a meaningful summary, incorporate it
   if (summary && summary.length > 0) {
     const short = summary.length > 40 ? summary.slice(0, 37) + "…" : summary;
     return `${base}: "${short}"`;
@@ -98,11 +105,78 @@ export function intentForTool(call: ToolCall, input: Record<string, unknown>): s
   return base;
 }
 
+export function shellApprovalFor(
+  call: ToolCall,
+  input: Record<string, unknown>,
+): ShellApproval {
+  const command = describeCall(call, input);
+  const primary = extractPrimaryCommand(command);
+  const risk = classifyRisk(command);
+  const riskLevel = riskLevelFor(risk);
+
+  return {
+    tool: call.name,
+    explanation: generateExplanation(call.name, command),
+    reason: generateReason(call.name, command),
+    riskLevel,
+    risk,
+    primaryCommand: primary,
+    fullCommand: command,
+  };
+}
+
+function extractPrimaryCommand(command: string): string {
+  const first = command.split("||")[0]?.split("&&")[0]?.trim() ?? "";
+  return first.replace(/>\/dev\/null\s*$/, "").replace(/2>&1\s*$/, "").trim();
+}
+
+function classifyRisk(command: string): "LOW" | "MEDIUM" | "HIGH" {
+  const lower = command.toLowerCase();
+  const highRisk = ["rm ", "rmdir", "del ", "format", "fdisk", "mkfs", "shutdown", "reboot", "drop ", "kill -9", "killall"];
+  const medRisk = ["npm install", "npm uninstall", "pip install", "pip uninstall", "chmod ", "chown ", "sudo ", "git push", "git reset", "git checkout", "> ", ">> "];
+
+  if (highRisk.some((r) => lower.includes(r))) return "HIGH";
+  if (medRisk.some((r) => lower.includes(r))) return "MEDIUM";
+  return "LOW";
+}
+
+function riskLevelFor(risk: "LOW" | "MEDIUM" | "HIGH"): "LOW" | "MEDIUM" | "HIGH" {
+  return risk;
+}
+
+function generateExplanation(tool: string, command: string): string {
+  if (tool === "bash") {
+    const cmd = command.toLowerCase();
+    if (cmd.includes("mkdir")) return "Cavehound wants to create a new directory.";
+    if (cmd.includes("ls ") || cmd.includes("dir ")) return "Cavehound wants to list directory contents.";
+    if (cmd.includes("rm ")) return "Cavehound wants to delete files or directories.";
+    if (cmd.includes("npm install") || cmd.includes("pip install")) return "Cavehound wants to install packages.";
+    if (cmd.includes("git ")) return "Cavehound wants to run a git command.";
+    if (cmd.includes("cat ") || cmd.includes("type ")) return "Cavehound wants to read a file's contents.";
+    if (cmd.includes("echo ")) return "Cavehound wants to write text to a file.";
+    return "Cavehound wants to run a shell command.";
+  }
+  return `${tool} wants to perform an action.`;
+}
+
+function generateReason(tool: string, command: string): string {
+  if (tool === "bash") {
+    const cmd = command.toLowerCase();
+    if (cmd.includes("mkdir")) return "I need a project folder before creating the project files.";
+    if (cmd.includes("ls ") || cmd.includes("dir ")) return "I need to see what files are in the directory.";
+    if (cmd.includes("rm ")) return "I need to remove files that are no longer needed.";
+    if (cmd.includes("npm install") || cmd.includes("pip install")) return "I need to install dependencies for the project.";
+    if (cmd.includes("git ")) return "I need to manage version control for this project.";
+    if (cmd.includes("cat ") || cmd.includes("type ")) return "I need to read the contents of a file.";
+    if (cmd.includes("echo ")) return "I need to write configuration or data to a file.";
+    return "I need to run this command to complete the task.";
+  }
+  return `I need to run ${tool} to complete the task.`;
+}
+
 function truncateWidth(text: string, width: number): string {
-  // Use visible length for truncation (ANSI stripped)
   const visible = text.replace(/\u001b\[[0-9;]*m/g, "");
   if (visible.length <= width) return text;
-  // Find a cut point that respects ANSI
   let out = "";
   let used = 0;
   let inAnsi = false;
@@ -126,14 +200,11 @@ function truncateWidth(text: string, width: number): string {
   return text;
 }
 
-/**
- * ActivityTracker groups tool calls into activity cards by intent.
- * Each turn gets one card; tool calls within the turn become steps.
- */
 export class ActivityTracker {
   private cards: ActivityCard[] = [];
   private currentCardId: string | undefined;
   private stepCounter = 0;
+  private verbose = false;
 
   get allCards(): ActivityCard[] {
     return this.cards;
@@ -143,7 +214,15 @@ export class ActivityTracker {
     return this.currentCardId ? this.cards.find((c) => c.id === this.currentCardId) : undefined;
   }
 
-  /** Start a new activity card for a turn. */
+  get isVerbose(): boolean {
+    return this.verbose;
+  }
+
+  toggleVerbose(): boolean {
+    this.verbose = !this.verbose;
+    return this.verbose;
+  }
+
   startCard(intent: string): ActivityCard {
     const id = `card-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const card: ActivityCard = {
@@ -158,7 +237,6 @@ export class ActivityTracker {
     return card;
   }
 
-  /** Add a step to the current card. Creates a card if none exists yet. */
   addStep(call: ToolCall, input: Record<string, unknown>): Step {
     let card = this.currentCard;
     if (!card) {
@@ -178,7 +256,6 @@ export class ActivityTracker {
     return step;
   }
 
-  /** Complete a step with a result. */
   completeStep(
     stepId: string,
     content: string,
@@ -203,32 +280,27 @@ export class ActivityTracker {
     return undefined;
   }
 
-  /** Set a permission request on the current card. */
-  setPermission(permission: ActivityPermission): void {
+  setShellApproval(approval: ShellApproval): void {
     const card = this.currentCard;
     if (card) {
-      card.permission = permission;
+      card.permission = approval;
       card.status = "warning";
     }
   }
 
-  /** Clear the permission request on the current card. */
   clearPermission(): void {
     const card = this.currentCard;
     if (card) card.permission = undefined;
   }
 
-  /** Get cards for rendering (only non-permission cards unless a permission is pending). */
   getRenderCards(): ActivityCard[] {
     return this.cards;
   }
 
-  /** Find a card by ID. */
   findCard(id: string): ActivityCard | undefined {
     return this.cards.find((c) => c.id === id);
   }
 
-  /** Toggle expansion of a card. */
   toggleCard(id: string): boolean {
     const card = this.findCard(id);
     if (card) {
@@ -238,12 +310,10 @@ export class ActivityTracker {
     return false;
   }
 
-  /** Collapse all cards. */
   collapseAll(): void {
     for (const card of this.cards) card.expanded = false;
   }
 
-  /** Expand all cards. */
   expandAll(): void {
     for (const card of this.cards) card.expanded = true;
   }

@@ -10,7 +10,6 @@ import { Session } from "../src/agent/session.js";
 import { Editor } from "../src/ui/editor.js";
 import { KeyParser } from "../src/ui/keys.js";
 import { composeFrame } from "../src/ui/screen.js";
-import { footerFor } from "../src/ui/tui.js";
 import { Transcript } from "../src/ui/transcript.js";
 import { stringWidth, stripAnsi } from "../src/util/width.js";
 import { wrapText } from "../src/util/wrap.js";
@@ -166,16 +165,6 @@ describe("Transcript", () => {
   });
 });
 
-describe("footerFor", () => {
-  it("drops hint groups so the footer always fits", () => {
-    assert.match(footerFor(200), /ctrl\+d quit/);
-    for (const width of [20, 40, 60, 80]) {
-      assert.ok(footerFor(width).length <= Math.max(2, width - 2), String(width));
-    }
-    assert.equal(footerFor(20), "enter send");
-  });
-});
-
 describe("composeFrame", () => {
   function frame(overrides: Partial<Parameters<typeof composeFrame>[0]> = {}) {
     const transcript = new Transcript();
@@ -184,14 +173,12 @@ describe("composeFrame", () => {
     return composeFrame({
       width: 80,
       height: 24,
-      headerLeft: "anycode v0.2.0",
-      headerRight: "anyroute/anyroute",
+      header: "anyroute/anyroute · ~/projects",
       transcript: transcript.render(78, false),
       scroll: 0,
       statusLeft: "ready · session abc123",
       statusRight: "12 in · 4 out",
       composer: { text: "next question", cursor: 13 },
-      footer: "enter send · ctrl+d quit",
       agentName: "Cavehound",
       agentMode: "idle",
       ...overrides,
@@ -204,8 +191,8 @@ describe("composeFrame", () => {
     for (const line of result.lines) assert.ok(stringWidth(line) <= 80, line);
 
     const text = result.lines.map(plain).join("\n");
-    assert.match(text, /anycode v0\.2\.0/);
     assert.match(text, /anyroute\/anyroute/);
+    assert.match(text, /~\//);
     assert.match(text, /hello there/);
     assert.match(text, /next question/);
   });
@@ -237,8 +224,12 @@ describe("composeFrame", () => {
       expanded: true,
       permission: {
         tool: "bash",
-        command: 'dir /s /b "C:\\Users\\ChipTech\\**\\cavehound*" 2>nul',
-        risk: "searches the entire user folder",
+        explanation: "Cavehound wants to search for files matching cavehound.",
+        reason: "I need to find the cavehound project directory.",
+        riskLevel: "LOW",
+        risk: "Read-only directory search",
+        primaryCommand: 'dir /s /b "C:\\Users\\ChipTech\\**\\cavehound*"',
+        fullCommand: 'dir /s /b "C:\\Users\\ChipTech\\**\\cavehound*" 2>nul',
       },
     });
     const result = frame({
@@ -247,7 +238,6 @@ describe("composeFrame", () => {
       statusLeft: "ready",
       statusRight: "12 in · 4 out",
       composer: { text: "next question", cursor: 13 },
-      footer: "enter send · ctrl+d quit",
     });
     const text = result.lines.map(plain).join("\n");
     assert.match(text, /Searching for 'cavehound'/);

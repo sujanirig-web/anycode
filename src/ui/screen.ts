@@ -10,9 +10,9 @@ export interface ApprovalView {
 export interface FrameInput {
   width: number;
   height: number;
-  headerLeft: string;
-  headerRight: string;
-  /** Hide the top header bar (version + provider/model). */
+  /** Header text showing active model and working directory. */
+  header: string;
+  /** Hide the top header bar. */
   showHeader?: boolean;
   /** Already-styled transcript lines. */
   transcript: string[];
@@ -22,7 +22,6 @@ export interface FrameInput {
   statusRight: string;
   composer: { text: string; cursor: number };
   approval?: ApprovalView;
-  footer: string;
   /** Token usage for compact display in composer context row. */
   usage?: { inputTokens: number; outputTokens: number };
   /** Agent name for composer placeholder (e.g. "Cavehound", "Atlas"). */
@@ -110,11 +109,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function headerLine(left: string, right: string, width: number): string {
-  const rightText = truncateWidth(right, Math.max(0, width - 14));
-  const available = Math.max(0, width - stringWidth(rightText) - 2);
-  const leftText = padToWidth(truncateWidth(left, available), available);
-  return color.bold(color.magenta(truncateWidth(`${leftText} ${rightText} `, width)));
+function headerLine(header: string, _right: string, width: number): string {
+  return color.bold(color.magenta(truncateWidth(header, width - 2)));
 }
 
 /** Format token usage compactly: under 1k shows raw, 1k+ uses k suffix. */
@@ -248,7 +244,7 @@ export function composeFrame(input: FrameInput): Frame {
 
   const lines: string[] = [];
   if (showHeader && bordered) {
-    lines.push(headerLine(input.headerLeft, input.headerRight, width));
+    lines.push(headerLine(input.header, "", width));
     lines.push("");
   }
 

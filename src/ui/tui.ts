@@ -3,6 +3,7 @@ import type { AgentEvent } from "../agent/agent.js";
 import type { PermissionAnswer } from "../agent/permissions.js";
 import { errorMessage } from "../errors.js";
 import type { PermissionRequest } from "../tools/types.js";
+import type { ToolCall } from "../types.js";
 
 import { color } from "../util/ansi.js";
 import { NAME, VERSION } from "../version.js";
@@ -12,7 +13,7 @@ import { KeyParser, type KeyEvent } from "./keys.js";
 import type { ChatState, InteractiveRuntime } from "./runtime.js";
 import { composeFrame, type Frame } from "./screen.js";
 import { Transcript } from "./transcript.js";
-import { ActivityTracker } from "./activity.js";
+import { ActivityTracker, shellApprovalFor } from "./activity.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 /** Buffer/loader bars that pulse to show the model is actively thinking. */
@@ -26,34 +27,7 @@ const CURSOR_OFF = "\u001b[?25l";
 const CTRL_C_WINDOW_MS = 1500;
 const TICK_MS = 50;
 
-const FOOTER_HINTS = [
-  { group: "send", hints: ["enter send", "ctrl+j newline"] },
-  { group: "nav", hints: ["/help", "pgup/pgdn scroll"] },
-  { group: "quit", hints: ["ctrl+d quit", "ctrl+c interrupt"] },
-  { group: "ui", hints: ["ctrl+o details", "ctrl+l repaint"] },
-] as const;
 
-/** Drop trailing hints until the footer fits the terminal width. */
-export function footerFor(width: number): string {
-  const groups = FOOTER_HINTS.map((g) => ({ ...g, hints: [...g.hints] }));
-  // Start with all groups, drop entire groups from the end until it fits.
-  while (groups.length > 1) {
-    const text = groups.map((g) => g.hints.join(" · ")).join("   ");
-    if (text.length <= width - 2) return text;
-    groups.pop();
-  }
-  // Last resort: drop individual hints from the last group.
-  const last = groups[groups.length - 1];
-  if (last) {
-    while (last.hints.length > 1) {
-      const text = last.hints.join(" · ");
-      if (text.length <= width - 2) return text;
-      last.hints.pop();
-    }
-    return last.hints.join(" · ");
-  }
-  return "ctrl+d quit";
-}
 
 interface BusyState {
   controller: AbortController;
@@ -281,12 +255,47 @@ export class Tui {
       this.paint();
       return;
     }
+    if (ctrl && name === "t") {
+      const verbose = this.tracker.toggleVerbose();
+      this.transcript.notice(verbose ? "Verbose mode: all cards expanded" : "Verbose mode: cards collapse after completion");
+      this.paint();
+      return;
+    }
     if (name === "pageup") {
       this.scrollBy(this.pageSize());
       return;
     }
     if (name === "pagedown") {
       this.scrollBy(-this.pageSize());
+      return;
+    }
+    if (name === "e") {
+      // Expand/collapse the selected activity card
+      const card = this.tracker.currentCard;
+      if (card) {
+        this.tracker.toggleCard(card.id);
+        this.paint();
+      }
+      return;
+    }
+    if (name === "o") {
+      // Toggle raw output for selected step - handled by transcript
+      this.paint();
+      return;
+    }
+    if (name === "v") {
+      // View full command for selected step
+      this.paint();
+      return;
+    }
+    if (name === "r") {
+      // Retry a failed step
+      this.paint();
+      return;
+    }
+    if (name === "tab") {
+      // Queue message while agent is working
+      this.paint();
       return;
     }
 
@@ -492,12 +501,13 @@ export class Tui {
   private ask(request: PermissionRequest): Promise<PermissionAnswer> {
     return new Promise<PermissionAnswer>((resolve) => {
       this.approval = { request, resolve };
-      this.tracker.setPermission({
-        tool: request.tool,
-        command: request.detail ?? "",
-        cwd: undefined,
-        risk: undefined,
-      });
+      const toolCall: ToolCall = {
+        id: `call-${Date.now()}`,
+        name: request.tool,
+        arguments: JSON.stringify({ command: request.detail ?? "" }),
+      };
+      const approval = shellApprovalFor(toolCall, { command: request.detail ?? "" });
+      this.tracker.setShellApproval(approval);
       this.transcript.updateCurrentActivity(this.tracker.currentCard!);
       this.paint();
     });
@@ -692,12 +702,12 @@ export class Tui {
       lines = [...palette, ...lines];
     }
 
+    const header = `${this.state.providerId}/${this.state.model} · ~/projects`;
     return composeFrame({
       width,
       height,
-      headerLeft: `${NAME} v${VERSION}`,
-      headerRight: `${this.state.providerId}/${this.state.model}`,
-      showHeader: false,
+      header,
+      showHeader: true,
       transcript: lines,
       scroll: this.scroll,
       statusLeft: this.statusLeft(),
@@ -711,12 +721,9 @@ export class Tui {
             },
           }
         : {}),
-      footer: this.approval
-        ? "y allow once · a always · n / esc deny"
-        : footerFor(width),
-        usage: this.state.session.usage,
-        agentName: "Cavehound",
-        agentMode: this.busy ? "running" : "idle",
+      usage: this.state.session.usage,
+      agentName: "Cavehound",
+      agentMode: this.busy ? "running" : "idle",
       });
   }
 
