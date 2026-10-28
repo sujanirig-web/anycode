@@ -17,21 +17,37 @@ function numberArg(input: Record<string, unknown>, key: string): number | undefi
 /** One-line summary of a tool call for the transcript. */
 export function describeCall(call: ToolCall, input: Record<string, unknown>): string {
   switch (call.name) {
-    case "bash":
-      return stringArg(input, "command") ?? "";
+    case "bash": {
+      const command = stringArg(input, "command") ?? "";
+      // Extract quoted strings (what's being searched for)
+      const match = command.match(/["']([^"']+)["']/);
+      const quoted = match?.[1];
+      if (quoted) {
+        // Get just the filename part from the path
+        const parts = quoted.split(/[/\\]/);
+        let filename = parts[parts.length - 1] ?? quoted;
+        // Remove wildcard characters for cleaner display
+        filename = filename.replace(/\*/g, "").replace(/\?/g, "");
+        if (filename) return `searching for ${filename}`;
+      }
+      return command;
+    }
     case "read":
     case "write":
     case "edit":
       return stringArg(input, "path") ?? "";
-    case "glob":
-      return stringArg(input, "pattern") ?? "";
+    case "glob": {
+      const pattern = stringArg(input, "pattern") ?? "";
+      // Get just the filename part from the path
+      const parts = pattern.split(/[/\\]/);
+      let filename = parts[parts.length - 1] ?? pattern;
+      // Remove wildcard characters for cleaner display
+      filename = filename.replace(/\*/g, "").replace(/\?/g, "");
+      return `searching for ${filename}`;
+    }
     case "grep": {
       const pattern = stringArg(input, "pattern") ?? "";
-      const include = stringArg(input, "include");
-      const path = stringArg(input, "path");
-      return [pattern, include ? `in ${include}` : "", path ? `at ${path}` : ""]
-        .filter(Boolean)
-        .join(" ");
+      return `searching for ${pattern}`;
     }
     default: {
       const json = JSON.stringify(input);
