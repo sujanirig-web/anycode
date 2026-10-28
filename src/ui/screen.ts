@@ -45,7 +45,7 @@ function renderCavehoundComposer(
   const rail = color.gray("▌");
   const lines: string[] = [];
 
-  const placeholder = "Ask Cavehound…";
+  const placeholder = "ask cavehound";
   const text = composer.text.length > 0 ? composer.text : placeholder;
   const textColor = composer.text.length > 0 ? color.white : color.gray;
   const cursorCol = Math.min(composer.cursor, text.length);
