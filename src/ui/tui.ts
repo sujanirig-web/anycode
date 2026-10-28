@@ -4,8 +4,9 @@ import type { PermissionAnswer } from "../agent/permissions.js";
 import { errorMessage } from "../errors.js";
 import type { PermissionRequest } from "../tools/types.js";
 import { formatNumber } from "../util/text.js";
+import { color } from "../util/ansi.js";
 import { NAME, VERSION } from "../version.js";
-import { handleSlashCommand } from "./commands.js";
+import { handleSlashCommand, type CommandItem, COMMANDS } from "./commands.js";
 import { Editor } from "./editor.js";
 import { KeyParser, type KeyEvent } from "./keys.js";
 import type { ChatState, InteractiveRuntime } from "./runtime.js";
@@ -116,6 +117,11 @@ export class Tui {
   private busy?: BusyState;
   private approval?: PendingApproval;
   private frame?: Frame;
+
+  /** Command palette state. */
+  private paletteOpen = false;
+  private paletteFilter = "";
+  private paletteSelected = 0;
 
   private tick?: NodeJS.Timeout;
   private paintTimer?: NodeJS.Timeout;
@@ -239,11 +245,15 @@ export class Tui {
       return;
     }
 
+    if (this.paletteOpen) {
+      this.handlePaletteKey(event);
+      return;
+    }
+
     if (event.type === "text") {
       this.applyEdit(event);
       return;
     }
-
     const name = event.name;
     const ctrl = event.ctrl === true;
 
@@ -280,15 +290,162 @@ export class Tui {
   private applyEdit(event: KeyEvent): void {
     const result = this.editor.handle(event);
     if (result.type === "changed") {
+      // Open command palette when "/" is typed at the start.
+      if (
+        !this.paletteOpen &&
+        this.editor.text === "/" &&
+        this.editor.cursor === 1
+      ) {
+        this.openPalette();
+      }
       this.paint();
       return;
     }
     if (result.type === "submit") {
+      if (this.paletteOpen) {
+        this.selectPaletteItem();
+        return;
+      }
       this.submit(result.text).catch((error: unknown) => {
         this.transcript.error(errorMessage(error));
         this.paint();
       });
     }
+  }
+
+  /** Open the command palette. */
+  private openPalette(): void {
+    this.paletteOpen = true;
+    this.paletteFilter = "/";
+    this.paletteSelected = 0;
+    this.editor.setText("/");
+    this.paint();
+  }
+
+  /** Close the command palette and clear the composer. */
+  private closePalette(): void {
+    this.paletteOpen = false;
+    this.paletteFilter = "";
+    this.paletteSelected = 0;
+    this.editor.clear();
+    this.paint();
+  }
+
+  /** Handle keys while the command palette is open. */
+  private handlePaletteKey(event: KeyEvent): void {
+    if (event.type === "text") {
+      // Append typed text to filter and editor.
+      this.editor.handle(event);
+      this.paletteFilter = this.editor.text;
+      this.paletteSelected = 0;
+      this.paint();
+      return;
+    }
+
+    const name = event.name;
+    const ctrl = event.ctrl === true;
+
+    if (ctrl && name === "c") {
+      this.closePalette();
+      return;
+    }
+    if (name === "escape") {
+      this.closePalette();
+      return;
+    }
+    if (name === "enter") {
+      this.selectPaletteItem();
+      return;
+    }
+    if (name === "backspace") {
+      this.editor.handle(event);
+      this.paletteFilter = this.editor.text;
+      if (this.paletteFilter === "/") {
+        this.paletteSelected = 0;
+      }
+      if (this.editor.text.length <= 1) {
+        this.closePalette();
+        return;
+      }
+      this.paint();
+      return;
+    }
+    if (name === "up") {
+      this.paletteSelected = (this.paletteSelected - 1 + this.filteredCommands().length) % this.filteredCommands().length;
+      this.paint();
+      return;
+    }
+    if (name === "down") {
+      this.paletteSelected = (this.paletteSelected + 1) % this.filteredCommands().length;
+      this.paint();
+      return;
+    }
+
+    // Let other keys (home, end, arrows, etc.) pass through to the editor.
+    this.editor.handle(event);
+    this.paletteFilter = this.editor.text;
+    this.paletteSelected = 0;
+    this.paint();
+  }
+
+  /** Commands matching the current palette filter. */
+  private filteredCommands(): CommandItem[] {
+    const f = this.paletteFilter.slice(1).toLowerCase(); // strip leading "/"
+    return COMMANDS.filter((c) => c.name.includes(f) || c.desc.toLowerCase().includes(f));
+  }
+
+  /** Execute the currently selected palette item. */
+  private selectPaletteItem(): void {
+    const cmd = this.filteredCommands()[this.paletteSelected];
+    if (!cmd) {
+      this.closePalette();
+      return;
+    }
+    this.closePalette();
+    // Execute the slash command via the shared handler.
+    const text = `/${cmd.name}`;
+    const sink = {
+      info: (message: string): void => {
+        this.transcript.info(message);
+      },
+      error: (message: string, hint?: string): void => {
+        this.transcript.error(message, hint);
+      },
+    };
+    this.submit(text).catch((error: unknown) => {
+      this.transcript.error(errorMessage(error));
+      this.paint();
+    });
+  }
+
+  /** Render the command palette overlay lines. */
+  private renderPalette(width: number): string[] {
+    const cmds = this.filteredCommands();
+    if (cmds.length === 0) {
+      return [color.dim("  No matching commands.")];
+    }
+
+    const lines: string[] = [];
+    lines.push(color.bold(color.magenta(" Commands")));
+    lines.push("");
+
+    const maxShow = Math.max(1, Math.floor(width / 2) - 2);
+    const start = Math.max(0, this.paletteSelected - Math.floor(maxShow / 2));
+    const end = Math.min(cmds.length, start + maxShow);
+
+    for (let i = start; i < end; i++) {
+      const cmd = cmds[i];
+      if (!cmd) continue;
+      const isSelected = i === this.paletteSelected;
+      const marker = isSelected ? "▸ " : "  ";
+      const namePart = color.bold(color.cyan(`/${cmd.name}`));
+      const descPart = color.dim(cmd.desc);
+      const argsPart = cmd.args ? ` ${color.gray(cmd.args)}` : "";
+      const line = `  ${marker}${namePart}${argsPart}  ${descPart}`;
+      lines.push(isSelected ? color.inverse(line) : line);
+    }
+
+    return lines;
   }
 
   private handleApprovalKey(event: KeyEvent): void {
@@ -502,6 +659,12 @@ export class Tui {
   }
 
   private compose(width: number, height: number, lines: string[]): Frame {
+    // If the command palette is open, overlay it on top of the transcript.
+    if (this.paletteOpen) {
+      const palette = this.renderPalette(width);
+      lines = [...palette, ...lines];
+    }
+
     return composeFrame({
       width,
       height,

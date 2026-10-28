@@ -16,6 +16,28 @@ export interface CommandSink {
   error(message: string, hint?: string): void;
 }
 
+export interface CommandItem {
+  name: string;
+  desc: string;
+  args?: string;
+}
+
+export const COMMANDS: CommandItem[] = [
+  { name: "help", desc: "Show this help" },
+  { name: "new", desc: "Start a new session", args: "(alias: /clear)" },
+  { name: "clear", desc: "Start a new session", args: "(alias: /new)" },
+  { name: "model", desc: "Show or change the model", args: "[name]" },
+  { name: "provider", desc: "Change the provider", args: "[id] [model]" },
+  { name: "providers", desc: "List available providers", args: "[add <id> <model> <url>]" },
+  { name: "sessions", desc: "List saved sessions" },
+  { name: "resume", desc: "Resume a session", args: "[id]" },
+  { name: "yolo", desc: "Toggle auto-approve" },
+  { name: "usage", desc: "Show token usage" },
+  { name: "tools", desc: "List available tools" },
+  { name: "exit", desc: "Quit", args: "(alias: /quit)" },
+  { name: "quit", desc: "Quit", args: "(alias: /exit)" },
+];
+
 export const SLASH_HELP = `Commands
   /help              Show this help
   /new               Start a new session (alias: /clear)
