@@ -323,4 +323,176 @@ describe("composeFrame", () => {
     assert.match(text, /hello there/);
     assert.match(text, /▌ hello there/);
   });
+
+  // Status strip tests
+
+  it("idle state shows no status strip", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+    });
+    const text = result.lines.map(plain).join("\n");
+    // No status strip line should appear
+    assert.ok(!text.includes("Working"), "Should not contain 'Working'");
+    assert.ok(!text.includes("Waiting for approval"), "Should not contain 'Waiting for approval'");
+    assert.ok(!text.includes("Failed"), "Should not contain 'Failed'");
+    assert.ok(!text.includes("Cancelled"), "Should not contain 'Cancelled'");
+    assert.ok(!text.includes("⠴"), "Should not contain spinner");
+    assert.ok(!text.includes("⚠"), "Should not contain warning icon");
+    assert.ok(!text.includes("✗"), "Should not contain error icon");
+  });
+
+  it("working state shows spinner, status, step, duration, and shortcuts", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "step 4",
+        currentStep: 4,
+        totalSteps: 10,
+        durationMs: 669000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /⠴ Working/);
+    assert.match(text, /step 4/);
+    assert.match(text, /11m 9s/);
+    assert.match(text, /Tab queue · Esc interrupt/);
+  });
+
+  it("Tab queue shortcut is not prefixed with ▌", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "step 4",
+        currentStep: 4,
+        totalSteps: 10,
+        durationMs: 669000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    // The ▌ character should only appear on composer lines, not status strip
+    const lines = text.split("\n");
+    const statusLine = lines.find((l) => l.includes("Tab queue"));
+    assert.ok(statusLine, "Tab queue line should exist");
+    assert.ok(!statusLine.includes("▌"), "Status strip should not have ▌ rail");
+  });
+
+  it("no bare ▇ glyph is rendered", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "step 4",
+        currentStep: 4,
+        totalSteps: 10,
+        durationMs: 669000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.ok(!text.includes("▇"), "Should not contain bare ▇ glyph");
+  });
+
+  it("approval state shows Waiting for approval and y/a/n shortcuts", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "awaiting_approval",
+        currentIntent: "bash",
+        currentStep: undefined,
+        totalSteps: undefined,
+        durationMs: undefined,
+        relevantShortcuts: "y run · a always · n cancel",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /⚠ Waiting for approval/);
+    assert.match(text, /y run/);
+    assert.match(text, /a always/);
+    assert.match(text, /n cancel/);
+  });
+
+  it("error state shows Failed and retry/output shortcuts", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "error",
+        currentIntent: "bash exited with code 1",
+        currentStep: undefined,
+        totalSteps: undefined,
+        durationMs: undefined,
+        relevantShortcuts: "r retry · o output",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /✗ Failed/);
+    assert.match(text, /r retry/);
+    assert.match(text, /o output/);
+  });
+
+  it("one blank line between status strip and composer", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "step 4",
+        currentStep: 4,
+        totalSteps: 10,
+        durationMs: 669000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    const lines = text.split("\n");
+    // Find the status line (with ⠴ Working) and the composer line (with ▌)
+    const statusIdx = lines.findIndex((l) => l.includes("⠴ Working"));
+    const composerIdx = lines.findIndex((l) => l.includes("▌"));
+    assert.ok(statusIdx >= 0, "Status line should exist");
+    assert.ok(composerIdx >= 0, "Composer line should exist");
+    assert.ok(composerIdx > statusIdx, "Composer should be after status");
+    // There should be exactly one blank line between them
+    const between = lines.slice(statusIdx + 1, composerIdx);
+    assert.ok(between.every((l) => l.trim() === ""), "Lines between status and composer should be blank");
+    assert.ok(between.length === 1, "Exactly one blank line between status strip and composer");
+  });
+
+  it("narrow terminal truncates intent without pushing shortcuts into composer", () => {
+    const result = frame({
+      width: 40,
+      height: 20,
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "This is a very long intent that should be truncated because the terminal is narrow",
+        currentStep: 4,
+        totalSteps: 10,
+        durationMs: 669000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+    const statusLine = text.split("\n").find((l) => l.includes("⠴ Working"));
+    assert.ok(statusLine, "Status line should exist");
+    // The shortcuts should still be visible on the status line
+    assert.ok(statusLine.includes("Tab queue · Esc interrupt"), "Shortcuts should remain visible");
+  });
 });

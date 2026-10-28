@@ -11,7 +11,7 @@ import { handleSlashCommand, type CommandItem, COMMANDS } from "./commands.js";
 import { Editor } from "./editor.js";
 import { KeyParser, type KeyEvent } from "./keys.js";
 import type { ChatState, InteractiveRuntime } from "./runtime.js";
-import { composeFrame, type Frame } from "./screen.js";
+import { composeFrame, type Frame, type AgentStatusStripInput } from "./screen.js";
 import { Transcript } from "./transcript.js";
 import { ActivityTracker, shellApprovalFor } from "./activity.js";
 
@@ -108,6 +108,9 @@ export class Tui {
   private escapeTimer?: NodeJS.Timeout;
   private lastInterrupt = 0;
   private cleaned = false;
+
+  /** Agent status strip state. */
+  private agentStatus: AgentStatusStripInput | undefined;
 
   private readonly done: Promise<void>;
   private resolveDone!: () => void;
@@ -680,21 +683,6 @@ export class Tui {
     this.paint();
   }
 
-  private statusLeft(): string {
-    if (this.busy) {
-      const elapsed = (Date.now() - this.busy.startedAt) / 1000;
-      const frame = SPINNER[Math.floor(elapsed * 10) % SPINNER.length] ?? "⠋";
-      const buffer = BUFFER[Math.floor(elapsed * 20) % BUFFER.length] ?? "█";
-      const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
-      return `${buffer} ${frame} ${this.busy.label} · ${seconds}s`;
-    }
-    return "";
-  }
-
-  private statusRight(): string {
-    return this.scroll > 0 ? `↑ ${this.scroll}` : "";
-  }
-
   private compose(width: number, height: number, lines: string[]): Frame {
     // If the command palette is open, overlay it on top of the transcript.
     if (this.paletteOpen) {
@@ -710,8 +698,6 @@ export class Tui {
       showHeader: true,
       transcript: lines,
       scroll: this.scroll,
-      statusLeft: this.statusLeft(),
-      statusRight: this.statusRight(),
       composer: { text: this.editor.text, cursor: this.editor.cursor },
       ...(this.approval
         ? {
@@ -724,7 +710,39 @@ export class Tui {
       usage: this.state.session.usage,
       agentName: "Cavehound",
       agentMode: this.busy ? "running" : "idle",
+      agentStatus: this.buildAgentStatus(),
       });
+  }
+
+  /** Build the agent status strip input from current Tui state. */
+  private buildAgentStatus(): AgentStatusStripInput | undefined {
+    if (this.busy) {
+      const elapsed = (Date.now() - this.busy.startedAt) / 1000;
+      const frame = SPINNER[Math.floor(elapsed * 10) % SPINNER.length] ?? "⠴";
+      const buffer = BUFFER[Math.floor(elapsed * 20) % BUFFER.length] ?? "█";
+      const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
+      return {
+        status: "working",
+        currentIntent: this.busy.label,
+        currentStep: undefined,
+        totalSteps: undefined,
+        durationMs: elapsed * 1000,
+        relevantShortcuts: "Tab queue · Esc interrupt",
+      };
+    }
+
+    if (this.approval) {
+      return {
+        status: "awaiting_approval",
+        currentIntent: this.approval.request.tool,
+        currentStep: undefined,
+        totalSteps: undefined,
+        durationMs: undefined,
+        relevantShortcuts: "y run · a always · n cancel",
+      };
+    }
+
+    return undefined;
   }
 
   private paint(): void {
