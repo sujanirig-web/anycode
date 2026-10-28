@@ -14,6 +14,7 @@ import { footerFor } from "../src/ui/tui.js";
 import { Transcript } from "../src/ui/transcript.js";
 import { stringWidth, stripAnsi } from "../src/util/width.js";
 import { wrapText } from "../src/util/wrap.js";
+import type { ActivityCard } from "../src/ui/activity.js";
 
 function plain(value: string): string {
   return stripAnsi(value);
@@ -212,7 +213,7 @@ describe("composeFrame", () => {
     const result = frame();
     assert.ok(result.cursor);
     const line = result.lines[result.cursor.row] ?? "";
-    assert.match(plain(line), /› next question/);
+    assert.match(plain(line), /▌ next question/);
     assert.ok(result.cursor.col <= 80);
   });
 
@@ -222,14 +223,37 @@ describe("composeFrame", () => {
     for (const line of result.lines) assert.ok(stringWidth(line) <= 40, line);
   });
 
-  it("shows approval details and hides the cursor", () => {
-    const result = frame({
-      approval: { title: "Run bash?  [y]es  [n]o  [a]lways", detail: "npm test" },
+  it("shows approval panel inside activity card", () => {
+    const transcript = new Transcript();
+    transcript.pushActivity({
+      id: "card-1",
+      intent: "Searching for 'cavehound'",
+      status: "warning",
+      steps: [
+        { id: "s1", tool: "list", status: "ok", summary: "111 entries", durationMs: 50 },
+        { id: "s2", tool: "bash", status: "warning", summary: "Search for cavehound directory", durationMs: 2200 },
+      ],
+      expanded: true,
+      permission: {
+        tool: "bash",
+        command: 'dir /s /b "C:\\Users\\ChipTech\\**\\cavehound*" 2>nul',
+        risk: "searches the entire user folder",
+      },
     });
-    assert.equal(result.cursor, undefined);
+    const result = frame({
+      transcript: transcript.render(78, false),
+      scroll: 0,
+      statusLeft: "ready",
+      statusRight: "12 in · 4 out",
+      composer: { text: "next question", cursor: 13 },
+      footer: "enter send · ctrl+d quit",
+    });
     const text = result.lines.map(plain).join("\n");
-    assert.match(text, /Run bash\?/);
-    assert.match(text, /npm test/);
+    assert.match(text, /Searching for 'cavehound'/);
+    assert.match(text, /⚠ bash/);
+    assert.match(text, /\[y\]/);
+    assert.match(text, /\[a\]/);
+    assert.match(text, /\[n\]/);
   });
 
   it("indicates scrollback when scrolled up", () => {

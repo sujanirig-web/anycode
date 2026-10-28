@@ -12,6 +12,7 @@ import { KeyParser, type KeyEvent } from "./keys.js";
 import type { ChatState, InteractiveRuntime } from "./runtime.js";
 import { composeFrame, type Frame } from "./screen.js";
 import { Transcript } from "./transcript.js";
+import { ActivityTracker } from "./activity.js";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 /** Buffer/loader bars that pulse to show the model is actively thinking. */
@@ -111,6 +112,7 @@ export class Tui {
   private readonly editor = new Editor();
   private readonly parser = new KeyParser();
   private readonly painter = new Painter(output);
+  private readonly tracker = new ActivityTracker();
 
   private scroll = 0;
   private expanded = false;
@@ -122,6 +124,10 @@ export class Tui {
   private paletteOpen = false;
   private paletteFilter = "";
   private paletteSelected = 0;
+
+  /** Activity card navigation. */
+  private selectedCardIndex = 0;
+  private selectedStepIndex: number | undefined;
 
   private tick?: NodeJS.Timeout;
   private paintTimer?: NodeJS.Timeout;
@@ -476,6 +482,9 @@ export class Tui {
     const pending = this.approval;
     if (!pending) return;
     this.approval = undefined;
+    this.tracker.clearPermission();
+    const card = this.tracker.currentCard;
+    if (card) this.transcript.updateCurrentActivity(card);
     pending.resolve(value);
     this.paint();
   }
@@ -483,6 +492,13 @@ export class Tui {
   private ask(request: PermissionRequest): Promise<PermissionAnswer> {
     return new Promise<PermissionAnswer>((resolve) => {
       this.approval = { request, resolve };
+      this.tracker.setPermission({
+        tool: request.tool,
+        command: request.detail ?? "",
+        cwd: undefined,
+        risk: undefined,
+      });
+      this.transcript.updateCurrentActivity(this.tracker.currentCard!);
       this.paint();
     });
   }
@@ -556,6 +572,10 @@ export class Tui {
     this.transcript.pushUser(text);
     this.scroll = 0;
 
+    const intent = text.length > 60 ? text.slice(0, 57) + "…" : text;
+    const card = this.tracker.startCard(intent);
+    this.transcript.updateCurrentActivity(card);
+
     const controller = new AbortController();
     this.busy = { controller, label: "thinking", startedAt: Date.now() };
     this.tick = setInterval(() => this.paint(), TICK_MS);
@@ -590,14 +610,26 @@ export class Tui {
         break;
       case "reasoning":
         break;
-      case "tool_start":
-        this.transcript.startTool(event.call, event.input);
+      case "tool_start": {
+        const step = this.tracker.addStep(event.call, event.input);
+        this.transcript.updateCurrentActivity(this.tracker.currentCard!);
         this.paint();
         break;
-      case "tool_end":
-        this.transcript.endTool(event.call.name, event.content, event.isError, event.durationMs);
+      }
+      case "tool_end": {
+        // Find the step id for this tool call - we need to track it
+        // For now, complete the most recent running step
+        const card = this.tracker.currentCard;
+        if (card) {
+          const runningStep = card.steps.find((s) => s.status === "running");
+          if (runningStep) {
+            this.tracker.completeStep(runningStep.id, event.content, event.isError, event.durationMs);
+            this.transcript.updateCurrentActivity(card);
+          }
+        }
         this.paint();
         break;
+      }
       case "compaction":
         this.transcript.notice(
           `Trimmed ${event.removedMessages} old messages to stay inside the context window.`,

@@ -4,8 +4,10 @@ import { oneLine } from "../util/text.js";
 import { wrapText } from "../util/wrap.js";
 import { describeCall, summarizeToolResult } from "./renderer.js";
 import type { ToolCall } from "../types.js";
+import type { ActivityCard } from "./activity.js";
+import { renderCardPanel } from "./card.js";
 
-type BlockKind = "user" | "assistant" | "tool" | "result" | "notice" | "error" | "info";
+type BlockKind = "user" | "assistant" | "tool" | "result" | "notice" | "error" | "info" | "activity";
 
 interface RenderCache {
   width: number;
@@ -20,9 +22,9 @@ interface Block {
   args?: string;
   isError?: boolean;
   durationMs?: number;
-  /** Show the tool name next to the summary (used for resumed sessions). */
   hydrated?: boolean;
   cache?: RenderCache;
+  card?: ActivityCard;
 }
 
 const CODE_GUTTER = "  │ ";
@@ -106,6 +108,23 @@ export class Transcript {
 
   pushAssistant(text: string): void {
     this.blocks.push({ kind: "assistant", text });
+  }
+
+  pushActivity(card: ActivityCard): void {
+    this.blocks.push({ kind: "activity", text: card.intent, card });
+  }
+
+  /** Replace the card in the most recent activity block (updates in place). */
+  updateCurrentActivity(card: ActivityCard): void {
+    for (let i = this.blocks.length - 1; i >= 0; i--) {
+      const block = this.blocks[i]!;
+      if (block.kind === "activity") {
+        block.card = card;
+        block.cache = undefined;
+        return;
+      }
+    }
+    this.pushActivity(card);
   }
 
   appendAssistant(delta: string): void {
@@ -215,6 +234,12 @@ export class Transcript {
         const args = block.args ?? "";
         if (args.length === 0) return [header];
         return wrapWithHangingIndent(args, width, `${header} `, "  ");
+      }
+
+      case "activity": {
+        const card = block.card;
+        if (!card) return [];
+        return renderCardPanel(card, Math.max(10, width - 2));
       }
 
       case "result": {

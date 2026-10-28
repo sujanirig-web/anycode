@@ -35,6 +35,53 @@ export interface Frame {
 const MIN_WIDTH = 20;
 const MIN_HEIGHT = 6;
 
+/** Render the Cavehound bottom composer with left accent rail and right-aligned context. */
+function renderCavehoundComposer(
+  composer: { text: string; cursor: number },
+  width: number,
+  mode: "idle" | "typing" | "working",
+): string[] {
+  const innerWidth = Math.max(1, width - 4);
+  const rail = color.gray("▌");
+  const lines: string[] = [];
+
+  const placeholder = "Ask Cavehound…";
+  const text = composer.text.length > 0 ? composer.text : placeholder;
+  const textColor = composer.text.length > 0 ? color.white : color.gray;
+  const cursorCol = Math.min(composer.cursor, text.length);
+  const visibleText = truncateWidth(text, innerWidth - 2);
+
+  // Line 1: rail + placeholder/input
+  lines.push(`${rail} ${textColor(visibleText)}`);
+
+  // Line 2: rail + hint row
+  if (mode === "working") {
+    lines.push(`${rail} ${color.dim("Tab queue · Esc interrupt")}`);
+  } else {
+    const attach = color.dim("attach");
+    const dot = color.dim("·");
+    const commands = color.dim("commands");
+    const dot2 = color.dim("·");
+    const run = color.dim("run");
+    lines.push(`${rail} ${attach} ${dot} ${commands} ${dot2} ${run}`);
+  }
+
+  // Line 3: context (right-aligned)
+  const context = color.gray("anyroute · ~/projects");
+  lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(context) - 2))}${context}`);
+
+  // Line 4: shortcuts (right-aligned)
+  const send = color.dim("↵ send");
+  const dot3 = color.dim("·");
+  const newline = color.dim("⇧↵ newline");
+  const dot4 = color.dim("·");
+  const tab = color.dim("Tab queue");
+  const shortcuts = `${send} ${dot3} ${newline} ${dot4} ${tab}`;
+  lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(shortcuts) - 2))}${shortcuts}`);
+
+  return lines;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -153,17 +200,7 @@ export function composeFrame(input: FrameInput): Frame {
   const prefix = bordered ? color.green(" › ") : color.green("› ");
   const continuation = "   ";
 
-  const approvalDetail = input.approval?.detail
-    ? input.approval.detail.split(/\r?\n/).slice(0, maxInputRows)
-    : [];
-
-  const composer = input.approval
-    ? {
-        rows: renderApprovalPanel(input.approval, width, maxInputRows),
-        cursorRow: 0,
-        cursorCol: 0,
-      }
-    : layoutComposer(input.composer, textWidth, maxInputRows, prefix, continuation);
+  const composer = layoutComposer(input.composer, textWidth, maxInputRows, prefix, continuation);
 
   const inputRows = composer.rows.length;
   const composerHeight = inputRows + borderRows;
@@ -211,10 +248,12 @@ export function composeFrame(input: FrameInput): Frame {
     );
   }
 
-  const boxed = boxLines(composer.rows, width, "╭", "╮", bordered);
-  // Thin divider between transcript body and the composer input area.
-  if (bordered) lines.push(color.blue("├" + "─".repeat(width - 2) + "┤"));
-  lines.push(...boxed);
+  const composerLines = renderCavehoundComposer(
+    input.composer,
+    input.width,
+    input.approval ? "working" : input.composer.text.length > 0 ? "typing" : "idle",
+  );
+  lines.push(...composerLines);
 
   if (effectiveFooter > 0) lines.push(color.gray(truncateWidth(` ${input.footer}`, width)));
 
@@ -223,9 +262,9 @@ export function composeFrame(input: FrameInput): Frame {
 
   if (input.approval) return { lines: frame, bodyHeight };
 
-  const cursorRow =
-    bodyTop + bodyHeight + effectiveStatus + (bordered ? 2 : 1) + composer.cursorRow;
-  const cursorCol = (bordered ? 1 : 0) + composer.cursorCol;
+  const composerStartRow = bodyTop + bodyHeight + effectiveStatus;
+  const cursorRow = composerStartRow;
+  const cursorCol = clamp(2 + input.composer.cursor, 0, width - 1);
   return {
     lines: frame,
     bodyHeight,
