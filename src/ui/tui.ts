@@ -679,7 +679,7 @@ export class Tui {
       ...(this.approval
         ? {
             approval: {
-              title: `${this.approval.request.title}  [y]es  [n]o  [a]lways`,
+              title: this.approval.request.title,
               ...(this.approval.request.detail ? { detail: this.approval.request.detail } : {}),
             },
           }

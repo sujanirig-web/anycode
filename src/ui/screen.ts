@@ -54,6 +54,26 @@ function sideBySide(left: string, right: string, width: number): string {
   return ` ${leftText}${" ".repeat(gap)}${rightText} `;
 }
 
+/** Render an approval panel inside the composer box: title, detail, hint. */
+function renderApprovalPanel(
+  approval: ApprovalView,
+  width: number,
+  maxRows: number,
+): string[] {
+  const innerWidth = Math.max(1, width - 2);
+  const lines: string[] = [];
+  const title = truncateWidth(approval.title, innerWidth);
+  const hint = color.yellow("  [y]es  [n]o  [a]lways");
+  lines.push(`${color.bold(color.red("⚠ "))}${color.bold(title)}${hint}`);
+  if (approval.detail) {
+    for (const line of approval.detail.split(/\r?\n/).slice(0, maxRows - 1)) {
+      lines.push(`   ${color.dim(truncateWidth(line, innerWidth - 3))}`);
+    }
+  }
+  while (lines.length < maxRows) lines.push("");
+  return lines;
+}
+
 interface ComposerLayout {
   rows: string[];
   cursorRow: number;
@@ -139,9 +159,7 @@ export function composeFrame(input: FrameInput): Frame {
 
   const composer = input.approval
     ? {
-        rows: (approvalDetail.length > 0 ? approvalDetail : ["(no details)"]).map((line) =>
-          `   ${color.dim(truncateWidth(line, width - 6))}`,
-        ),
+        rows: renderApprovalPanel(input.approval, width, maxInputRows),
         cursorRow: 0,
         cursorCol: 0,
       }
@@ -189,7 +207,7 @@ export function composeFrame(input: FrameInput): Frame {
 
   if (effectiveStatus > 0) {
     lines.push(
-      color.bold(color.gray(sideBySide(input.approval ? `⚠ ${input.approval.title}` : input.statusLeft, input.statusRight, width))),
+      color.bold(color.gray(sideBySide(input.approval ? "⚠ approval pending" : input.statusLeft, input.statusRight, width))),
     );
   }
 
