@@ -28,7 +28,9 @@ export function describeCall(call: ToolCall, input: Record<string, unknown>): st
         let filename = parts[parts.length - 1] ?? quoted;
         // Remove wildcard characters for cleaner display
         filename = filename.replace(/\*/g, "").replace(/\?/g, "");
-        if (filename) return `searching for ${filename}`;
+        // Deduplicate terms separated by | to avoid repetition
+        const terms = filename.split(/\s*\|\s*/).filter((t, i, arr) => arr.indexOf(t) === i);
+        if (terms[0]) return `searching for ${terms.join(" | ")}`;
       }
       return command;
     }
@@ -47,7 +49,9 @@ export function describeCall(call: ToolCall, input: Record<string, unknown>): st
     }
     case "grep": {
       const pattern = stringArg(input, "pattern") ?? "";
-      return `searching for ${pattern}`;
+      // Deduplicate terms separated by | to avoid repetition
+      const terms = pattern.split(/\s*\|\s*/).filter((t, i, arr) => arr.indexOf(t) === i);
+      return `searching for ${terms.join(" | ")}`;
     }
     default: {
       const json = JSON.stringify(input);
