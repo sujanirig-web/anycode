@@ -225,7 +225,7 @@ export async function main(argv: string[]): Promise<number> {
   if (!interactive && !resumeInteractive && !prompt) {
     throw new UserError(
       "No prompt provided.",
-      `Run \`${NAME}\` for the interactive REPL, or \`${NAME} "your task"\`.`,
+      `Run \`${NAME}\` for the interactive UI, or \`${NAME} "your task"\`.`,
     );
   }
   if (jsonMode && !prompt) {
