@@ -510,6 +510,7 @@ export class Tui {
       height,
       headerLeft: `${NAME} v${VERSION}`,
       headerRight: `${this.state.providerId}/${this.state.model}`,
+      showHeader: false,
       transcript: lines,
       scroll: this.scroll,
       statusLeft: this.statusLeft(),

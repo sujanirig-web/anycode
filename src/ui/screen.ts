@@ -12,6 +12,8 @@ export interface FrameInput {
   height: number;
   headerLeft: string;
   headerRight: string;
+  /** Hide the top header bar (version + provider/model). */
+  showHeader?: boolean;
   /** Already-styled transcript lines. */
   transcript: string[];
   /** Lines scrolled up from the bottom (0 = follow the tail). */
@@ -118,7 +120,9 @@ export function composeFrame(input: FrameInput): Frame {
   const width = Math.max(MIN_WIDTH, Math.floor(input.width));
   const height = Math.max(MIN_HEIGHT, Math.floor(input.height));
 
+  const showHeader = input.showHeader !== false;
   const bordered = width >= 34 && height >= 12;
+  const headerRows = showHeader && bordered ? 2 : 0; // header line + blank spacer
   const footerRows = bordered ? 1 : 0;
   const statusRows = bordered ? 1 : 0;
   const borderRows = bordered ? 2 : 0;
@@ -145,8 +149,8 @@ export function composeFrame(input: FrameInput): Frame {
 
   const inputRows = composer.rows.length;
   const composerHeight = inputRows + borderRows;
-  const bodyTop = bordered ? 2 : 1;
-  let bodyHeight = height - bodyTop - composerHeight - statusRows - footerRows - dividerRows;
+  const bodyTop = bordered ? (showHeader ? 2 : 0) : 0;
+  let bodyHeight = height - bodyTop - composerHeight - statusRows - footerRows - dividerRows - headerRows;
 
   // Very short terminals: drop the status/footer before dropping transcript rows.
   let effectiveStatus = statusRows;
@@ -164,8 +168,10 @@ export function composeFrame(input: FrameInput): Frame {
   }
 
   const lines: string[] = [];
-  lines.push(headerLine(input.headerLeft, input.headerRight, width));
-  if (bordered) lines.push("");
+  if (showHeader && bordered) {
+    lines.push(headerLine(input.headerLeft, input.headerRight, width));
+    lines.push("");
+  }
 
   const total = input.transcript.length;
   const scroll = clamp(input.scroll, 0, Math.max(0, total - 1));
