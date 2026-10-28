@@ -161,7 +161,7 @@ export class Tui {
       autoApprove: this.runtime.broker.autoApprove,
     });
     if (this.state.session.messages.length > 0) {
-      this.transcript.info(`Resumed session ${this.state.session.id}`);
+      this.transcript.info("Resumed session.");
       this.transcript.hydrate(this.state.session);
     }
   }
@@ -484,13 +484,16 @@ export class Tui {
       const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
       return `${buffer} ${frame} ${this.busy.label} · ${seconds}s`;
     }
-    return `ready · session ${this.state.session.id.slice(-6)}`;
+    return "ready";
   }
 
   private statusRight(): string {
     const usage = this.state.session.usage;
     const tokens = `${formatNumber(usage.inputTokens)} in · ${formatNumber(usage.outputTokens)} out`;
-    return this.scroll > 0 ? `${tokens} · ↑ ${this.scroll}` : tokens;
+    const model = `${this.state.providerId}/${this.state.model}`;
+    return this.scroll > 0
+      ? `${tokens} · ${model} · ↑ ${this.scroll}`
+      : `${tokens} · ${model}`;
   }
 
   private compose(width: number, height: number, lines: string[]): Frame {

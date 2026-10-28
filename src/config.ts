@@ -26,6 +26,24 @@ export function homeDir(): string {
   return process.env.ANYCODE_HOME ?? os.homedir();
 }
 
+export interface ProviderInfo {
+  id: string;
+  model: string;
+  baseURL?: string;
+  keyEnv?: string;
+  contextTokens?: number;
+}
+
+export function listProviders(): ProviderInfo[] {
+  return PROVIDER_IDS.map((id) => ({
+    id,
+    model: PROVIDER_DEFAULTS[id]?.model ?? "",
+    baseURL: PROVIDER_DEFAULTS[id]?.baseURL,
+    keyEnv: PROVIDER_DEFAULTS[id]?.keyEnv,
+    contextTokens: PROVIDER_DEFAULTS[id]?.contextTokens,
+  }));
+}
+
 export function configPaths(cwd: string): { global: string; project: string } {
   return {
     global: path.join(homeDir(), ".anycode", "config.json"),
@@ -65,6 +83,25 @@ export function defaultBaseURLFor(provider: string): string | undefined {
   if (provider === "anthropic") return "https://api.anthropic.com/v1";
   if (provider === "openai") return "https://api.openai.com/v1";
   return PROVIDER_DEFAULTS[provider]?.baseURL;
+}
+
+/**
+ * Merge built-in provider defaults with any custom preset saved in the config
+ * layers (global then project). Custom presets can override built-ins.
+ */
+export function resolveProviderDefaults(
+  provider: string,
+  global?: Record<string, unknown>,
+  project?: Record<string, unknown>,
+): ProviderDefaults {
+  const builtIn = PROVIDER_DEFAULTS[provider] ?? {};
+  const customGlobal = (global?.providers as Record<string, unknown> ?? {})[provider];
+  const customProject = (project?.providers as Record<string, unknown> ?? {})[provider];
+  return {
+    ...builtIn,
+    ...(typeof customGlobal === "object" && customGlobal !== null ? customGlobal : {}),
+    ...(typeof customProject === "object" && customProject !== null ? customProject : {}),
+  } as ProviderDefaults;
 }
 
 async function readJsonFile(file: string): Promise<Record<string, unknown> | undefined> {
@@ -146,21 +183,23 @@ export async function loadConfig(
     pickString(global, "provider") ??
     "anthropic";
 
+  const defaults = resolveProviderDefaults(provider, global, project);
+
   const model =
     overrides.model ??
     env.ANYCODE_MODEL ??
     pickString(project, "model") ??
     pickString(global, "model") ??
-    defaultModelFor(provider);
+    defaults.model;
 
   const baseURL =
     overrides.baseURL ??
     env.ANYCODE_BASE_URL ??
     pickString(project, "baseURL") ??
     pickString(global, "baseURL") ??
-    defaultBaseURLFor(provider);
+    defaults.baseURL;
 
-  const keyEnv = apiKeyEnvFor(provider);
+  const keyEnv = defaults.keyEnv;
   const apiKey =
     overrides.apiKey ??
     env.ANYCODE_API_KEY ??
@@ -194,7 +233,7 @@ export async function loadConfig(
       overrides.contextTokens ??
       pickNumber(project, "contextTokens") ??
       pickNumber(global, "contextTokens") ??
-      PROVIDER_DEFAULTS[provider]?.contextTokens ??
+      defaults.contextTokens ??
       200_000,
     autoApprove:
       overrides.autoApprove ??
@@ -209,5 +248,28 @@ export async function saveGlobalConfig(updates: Record<string, unknown>): Promis
   const existing = (await readJsonFile(file)) ?? {};
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify({ ...existing, ...updates }, null, 2)}\n`, "utf8");
+  return file;
+}
+
+/**
+ * Save a custom provider preset to the global config so it can be reused.
+ * The config key is `providers.<id>` with model, baseURL, keyEnv, contextTokens.
+ */
+export async function saveProviderPreset(id: string, preset: {
+  model?: string;
+  baseURL?: string;
+  keyEnv?: string;
+  contextTokens?: number;
+}): Promise<string> {
+  const file = path.join(homeDir(), ".anycode", "config.json");
+  const existing = (await readJsonFile(file)) ?? {};
+  const providers = { ...(existing.providers as Record<string, unknown> ?? {}) };
+  providers[id] = { ...preset };
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(
+    file,
+    `${JSON.stringify({ ...existing, providers }, null, 2)}\n`,
+    "utf8",
+  );
   return file;
 }

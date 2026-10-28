@@ -134,6 +134,32 @@ To make AnyRoute the default provider, put this in `~/.anycode/config.json`:
 { "provider": "anyroute", "model": "anyroute" }
 ```
 
+### Providers
+
+List available providers (built-in plus any custom presets you've added):
+
+```bash
+anycode
+# then inside the TUI:
+/providers
+```
+
+Switch to a provider:
+
+```bash
+/providers anthropic
+/providers anyroute gemini/gemini-flash-latest
+```
+
+Add a custom provider preset (saved to `~/.anycode/config.json`):
+
+```bash
+/providers add my-llm custom-model http://127.0.0.1:7777/v1 MY_LLM_KEY
+```
+
+Custom providers are merged with built-in defaults, so you can override any built-in
+provider's model, base URL, or context window by adding a preset with the same ID.
+
 ## CLI
 
 ```

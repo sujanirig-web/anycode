@@ -41,7 +41,7 @@ function headerLine(left: string, right: string, width: number): string {
   const rightText = truncateWidth(right, Math.max(0, width - 14));
   const available = Math.max(0, width - stringWidth(rightText) - 2);
   const leftText = padToWidth(truncateWidth(left, available), available);
-  return color.bold(truncateWidth(`${leftText} ${rightText} `, width));
+  return color.bold(color.cyan(truncateWidth(`${leftText} ${rightText} `, width)));
 }
 
 function sideBySide(left: string, right: string, width: number): string {
@@ -183,7 +183,7 @@ export function composeFrame(input: FrameInput): Frame {
 
   if (effectiveStatus > 0) {
     lines.push(
-      color.dim(sideBySide(input.approval ? `⚠ ${input.approval.title}` : input.statusLeft, input.statusRight, width)),
+      color.bold(color.gray(sideBySide(input.approval ? `⚠ ${input.approval.title}` : input.statusLeft, input.statusRight, width))),
     );
   }
 

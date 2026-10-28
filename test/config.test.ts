@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { defaultBaseURLFor, defaultModelFor, loadConfig } from "../src/config.js";
+import { defaultBaseURLFor, defaultModelFor, loadConfig, listProviders, resolveProviderDefaults, saveProviderPreset } from "../src/config.js";
 import { createProvider } from "../src/llm/index.js";
 import { OpenAIProvider } from "../src/llm/openai.js";
 
@@ -151,5 +151,53 @@ describe("anyroute provider", () => {
       baseURL: "http://127.0.0.1:9999/v1",
     });
     assert.equal(provider.id, "anyroute");
+  });
+});
+
+describe("provider presets", () => {
+  it("lists all built-in providers", () => {
+    const providers = listProviders();
+    const ids = providers.map((p) => p.id);
+    assert.ok(ids.includes("anthropic"));
+    assert.ok(ids.includes("openai"));
+    assert.ok(ids.includes("openai-compatible"));
+    assert.ok(ids.includes("ollama"));
+    assert.ok(ids.includes("anyroute"));
+    for (const p of providers) {
+      assert.ok(typeof p.model === "string");
+    }
+  });
+
+  it("resolves built-in defaults without custom presets", () => {
+    const defaults = resolveProviderDefaults("anyroute");
+    assert.equal(defaults.model, "anyroute");
+    assert.equal(defaults.baseURL, "http://127.0.0.1:3456/v1");
+    assert.equal(defaults.contextTokens, 1_000_000);
+  });
+
+  it("resolves custom project preset overriding built-in", () => {
+    const defaults = resolveProviderDefaults("anyroute", undefined, {
+      providers: { anyroute: { model: "gemini/custom", baseURL: "http://127.0.0.1:9999/v1" } },
+    });
+    assert.equal(defaults.model, "gemini/custom");
+    assert.equal(defaults.baseURL, "http://127.0.0.1:9999/v1");
+    assert.equal(defaults.contextTokens, 1_000_000);
+  });
+
+  it("saves and loads a custom provider preset", async () => {
+    await withHome(async (home, _cwd) => {
+      await saveProviderPreset("my-llm", {
+        model: "custom-model",
+        baseURL: "http://127.0.0.1:7777/v1",
+        keyEnv: "MY_LLM_KEY",
+        contextTokens: 500_000,
+      });
+
+      const config = await loadConfig(_cwd, { provider: "my-llm" });
+      assert.equal(config.provider, "my-llm");
+      assert.equal(config.model, "custom-model");
+      assert.equal(config.baseURL, "http://127.0.0.1:7777/v1");
+      assert.equal(config.contextTokens, 500_000);
+    });
   });
 });

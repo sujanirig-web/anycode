@@ -7,7 +7,7 @@ import { Agent } from "./agent/agent.js";
 import { PermissionBroker } from "./agent/permissions.js";
 import { createSystemPrompt } from "./agent/prompt.js";
 import { Session, latestSession, listSessions } from "./agent/session.js";
-import { loadConfig, type Config, type ConfigOverrides } from "./config.js";
+import { loadConfig, saveProviderPreset, listProviders, type Config, type ConfigOverrides } from "./config.js";
 import { UserError, errorMessage } from "./errors.js";
 import { createProvider } from "./llm/index.js";
 import { color } from "./util/ansi.js";
@@ -311,6 +311,10 @@ export async function main(argv: string[]): Promise<number> {
       },
       listSessions: () => listSessions(cwd),
       loadSession: (id) => Session.load(cwd, id),
+      listProviders: async () => listProviders(),
+      saveProvider: async (id, preset) => {
+        await saveProviderPreset(id, preset);
+      },
     };
 
     await (useTui ? runTui(runtime) : runRepl(runtime));

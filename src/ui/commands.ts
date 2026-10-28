@@ -1,6 +1,6 @@
 import type { PermissionBroker } from "../agent/permissions.js";
 import { Session } from "../agent/session.js";
-import { defaultModelFor } from "../config.js";
+import { defaultModelFor, listProviders, saveProviderPreset } from "../config.js";
 import { errorMessage } from "../errors.js";
 import { builtinTools } from "../tools/index.js";
 import { formatNumber, oneLine } from "../util/text.js";
@@ -20,6 +20,8 @@ export const SLASH_HELP = `Commands
   /new               Start a new session (alias: /clear)
   /model [name]      Show or change the model
   /provider [id]     Change the provider (optionally with a model)
+  /providers         List available providers
+  /providers add <id> <model> <base-url>  Add a custom provider preset
   /sessions          List saved sessions for this directory
   /resume [id]       Resume a session (default: most recent)
   /yolo              Toggle auto-approve for the rest of the session
@@ -67,7 +69,7 @@ export async function handleSlashCommand(
         model: state.model,
       });
       Object.assign(state, rebuilt);
-      sink.info(`Started session ${state.session.id}`);
+      sink.info("Started new session.");
       return false;
     }
 
@@ -108,6 +110,40 @@ export async function handleSlashCommand(
       return false;
     }
 
+    case "providers": {
+      const sub = argument.split(/\s+/);
+      const action = sub[0] ?? "list";
+      if (action === "list" || action === "") {
+        const providers = await host.listProviders();
+        sink.info("Providers:");
+        for (const p of providers) {
+          const marker = p.id === state.providerId ? "*" : " ";
+          const base = p.baseURL ? ` · ${p.baseURL}` : "";
+          const ctx = p.contextTokens ? ` · ${formatNumber(p.contextTokens)} ctx` : "";
+          sink.info(
+            `${marker} ${p.id.padEnd(14)} ${p.model}${base}${ctx}`,
+          );
+        }
+        return false;
+      }
+      if (action === "add") {
+        const [id, model, baseURL, keyEnv] = sub.slice(1);
+        if (!id || !model || !baseURL) {
+          sink.error("Usage: /providers add <id> <model> <base-url> [key-env]");
+          return false;
+        }
+        try {
+          await host.saveProvider(id, { model, baseURL, ...(keyEnv ? { keyEnv } : {}) });
+          sink.info(`Added provider ${id} (${model})`);
+        } catch (error) {
+          sink.error(errorMessage(error));
+        }
+        return false;
+      }
+      sink.error(`Unknown providers action /providers ${action}. Use /providers or /providers add.`);
+      return false;
+    }
+
     case "sessions": {
       const sessions = await host.listSessions();
       if (sessions.length === 0) {
@@ -139,7 +175,7 @@ export async function handleSlashCommand(
         });
         Object.assign(state, rebuilt);
         sink.info(
-          `Resumed ${state.session.id} (${state.session.messages.length} messages, ${oneLine(state.session.title, 50)})`,
+          `Resumed session (${state.session.messages.length} messages, ${oneLine(state.session.title, 50)})`,
         );
       } catch (error) {
         sink.error(errorMessage(error));
