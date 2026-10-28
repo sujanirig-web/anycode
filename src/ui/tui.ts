@@ -25,24 +25,32 @@ const CTRL_C_WINDOW_MS = 1500;
 const TICK_MS = 50;
 
 const FOOTER_HINTS = [
-  "enter send",
-  "ctrl+j newline",
-  "/help",
-  "ctrl+d quit",
-  "ctrl+o details",
-  "pgup/pgdn scroll",
-  "ctrl+c interrupt",
+  { group: "send", hints: ["enter send", "ctrl+j newline"] },
+  { group: "nav", hints: ["/help", "pgup/pgdn scroll"] },
+  { group: "quit", hints: ["ctrl+d quit", "ctrl+c interrupt"] },
+  { group: "ui", hints: ["ctrl+o details", "ctrl+l repaint"] },
 ] as const;
 
 /** Drop trailing hints until the footer fits the terminal width. */
 export function footerFor(width: number): string {
-  const hints = [...FOOTER_HINTS];
-  while (hints.length > 1) {
-    const text = hints.join(" · ");
+  const groups = FOOTER_HINTS.map((g) => ({ ...g, hints: [...g.hints] }));
+  // Start with all groups, drop entire groups from the end until it fits.
+  while (groups.length > 1) {
+    const text = groups.map((g) => g.hints.join(" · ")).join("   ");
     if (text.length <= width - 2) return text;
-    hints.pop();
+    groups.pop();
   }
-  return hints.join(" · ");
+  // Last resort: drop individual hints from the last group.
+  const last = groups[groups.length - 1];
+  if (last) {
+    while (last.hints.length > 1) {
+      const text = last.hints.join(" · ");
+      if (text.length <= width - 2) return text;
+      last.hints.pop();
+    }
+    return last.hints.join(" · ");
+  }
+  return "ctrl+d quit";
 }
 
 interface BusyState {

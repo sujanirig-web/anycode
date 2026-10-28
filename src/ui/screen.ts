@@ -41,7 +41,7 @@ function headerLine(left: string, right: string, width: number): string {
   const rightText = truncateWidth(right, Math.max(0, width - 14));
   const available = Math.max(0, width - stringWidth(rightText) - 2);
   const leftText = padToWidth(truncateWidth(left, available), available);
-  return color.bold(color.cyan(truncateWidth(`${leftText} ${rightText} `, width)));
+  return color.bold(color.magenta(truncateWidth(`${leftText} ${rightText} `, width)));
 }
 
 function sideBySide(left: string, right: string, width: number): string {
@@ -97,15 +97,15 @@ function boxLines(
 ): string[] {
   const innerWidth = Math.max(1, width - 2);
   const lines: string[] = [];
-  if (bordered) lines.push(color.dim(`${top}${"─".repeat(innerWidth)}${bottom}`));
+  if (bordered) lines.push(color.blue(`${top}${"─".repeat(innerWidth)}${bottom}`));
   for (const line of inner) {
     if (bordered) {
-      lines.push(`${color.dim("│")}${padToWidth(truncateWidth(line, innerWidth), innerWidth)}${color.dim("│")}`);
+      lines.push(`${color.blue("│")}${padToWidth(truncateWidth(line, innerWidth), innerWidth)}${color.blue("│")}`);
     } else {
       lines.push(truncateWidth(line, width));
     }
   }
-  if (bordered) lines.push(color.dim(`╰${"─".repeat(innerWidth)}╯`));
+  if (bordered) lines.push(color.blue(`╰${"─".repeat(innerWidth)}╯`));
   return lines;
 }
 
@@ -126,7 +126,7 @@ export function composeFrame(input: FrameInput): Frame {
 
   const maxInputRows = Math.max(1, bordered ? height - 8 : 3);
   const textWidth = bordered ? width - 5 : width - 2;
-  const prefix = bordered ? " › " : "› ";
+  const prefix = bordered ? color.green(" › ") : color.green("› ");
   const continuation = "   ";
 
   const approvalDetail = input.approval?.detail
@@ -189,10 +189,10 @@ export function composeFrame(input: FrameInput): Frame {
 
   const boxed = boxLines(composer.rows, width, "╭", "╮", bordered);
   // Thin divider between transcript body and the composer input area.
-  if (bordered) lines.push(color.dim("├" + "─".repeat(width - 2) + "┤"));
+  if (bordered) lines.push(color.blue("├" + "─".repeat(width - 2) + "┤"));
   lines.push(...boxed);
 
-  if (effectiveFooter > 0) lines.push(color.dim(truncateWidth(` ${input.footer}`, width)));
+  if (effectiveFooter > 0) lines.push(color.gray(truncateWidth(` ${input.footer}`, width)));
 
   while (lines.length < height) lines.push("");
   const frame = lines.slice(0, height);

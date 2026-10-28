@@ -161,7 +161,7 @@ describe("Transcript", () => {
 });
 
 describe("footerFor", () => {
-  it("drops hints so the footer always fits", () => {
+  it("drops hint groups so the footer always fits", () => {
     assert.match(footerFor(200), /ctrl\+d quit/);
     for (const width of [20, 40, 60, 80]) {
       assert.ok(footerFor(width).length <= Math.max(2, width - 2), String(width));

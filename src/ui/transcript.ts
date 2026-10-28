@@ -27,6 +27,9 @@ interface Block {
 
 const CODE_GUTTER = "  │ ";
 const RESULT_GUTTER = "  ⎿ ";
+const USER_PREFIX = color.green("› ");
+const TOOL_PREFIX = color.blue("⏺ ");
+const RESULT_PREFIX = color.gray("⎿ ");
 
 function colorizeInline(line: string): string {
   return line.replace(/`([^`]+)`/g, (_match, code: string) => color.cyan(code));
@@ -164,9 +167,9 @@ export class Transcript {
 
   welcome(options: { cwd: string; provider: string; model: string; autoApprove: boolean }): void {
     const lines = [
-      `cwd      ${options.cwd}`,
-      `model    ${options.provider}/${options.model}${options.autoApprove ? "  (auto-approve)" : ""}`,
-      "Ask for a change, or type /help for commands.",
+      color.bold(color.gray(`cwd      ${options.cwd}`)),
+      color.bold(color.gray(`model    ${options.provider}/${options.model}${options.autoApprove ? "  (auto-approve)" : ""}`)),
+      color.dim("Ask for a change, or type /help for commands."),
     ];
     this.blocks.push({ kind: "info", text: lines.join("\n") });
   }
@@ -200,7 +203,7 @@ export class Transcript {
       case "user": {
         const wrapped = wrapText(block.text, Math.max(1, width - 2));
         return wrapped.map((line, index) =>
-          index === 0 ? `${color.cyan("› ")}${color.bold(line)}` : `  ${color.bold(line)}`,
+          index === 0 ? `${USER_PREFIX}${color.bold(line)}` : `  ${color.bold(line)}`,
         );
       }
 
@@ -209,7 +212,7 @@ export class Transcript {
 
       case "tool": {
         const label = block.name ?? "tool";
-        const header = `${color.green("⏺ ")}${color.cyan(label)}`;
+        const header = `${TOOL_PREFIX}${color.cyan(label)}`;
         const args = block.args ?? "";
         if (args.length === 0) return [header];
         return wrapWithHangingIndent(args, width, `${header} `, "  ");
@@ -223,8 +226,8 @@ export class Transcript {
             ? color.gray(` (${(block.durationMs / 1000).toFixed(1)}s)`)
             : "";
         const head = block.isError
-          ? `${color.red(RESULT_GUTTER)}${color.red(summary)}`
-          : `${color.gray(RESULT_GUTTER)}${color.gray(summary)}`;
+          ? `${color.red(RESULT_PREFIX)}${color.red(summary)}`
+          : `${color.gray(RESULT_PREFIX)}${color.gray(summary)}`;
 
         if (!expanded) return [`${head}${timing}`];
 
@@ -246,7 +249,9 @@ export class Transcript {
       }
 
       case "notice":
-        return wrapWithHangingIndent(block.text, width, `${color.yellow("! ")}`, "  ");
+        return wrapWithHangingIndent(block.text, width, `${color.yellow("! ")}`, "  ").map(
+          (line, index) => (index === 0 ? line : color.yellow("  ") + line.slice(2)),
+        );
 
       case "error": {
         const wrapped = wrapText(block.text, Math.max(1, width - 2));
