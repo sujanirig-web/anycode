@@ -32,6 +32,8 @@ export interface ChatRuntime {
   listProviders(): Promise<Array<{ id: string; model: string; baseURL?: string; keyEnv?: string; contextTokens?: number; site?: string }>>;
   /** Save a custom provider preset to the global config. */
   saveProvider(id: string, preset: { model?: string; baseURL?: string; keyEnv?: string; contextTokens?: number; site?: string }): Promise<void>;
+  /** Open the interactive model picker (TUI only). */
+  showModelPicker?(): Promise<void>;
 }
 
 /** Everything an interactive front end (REPL or TUI) needs, built by `main.ts`. */

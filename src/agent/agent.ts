@@ -35,6 +35,8 @@ export interface AgentOptions {
   maxTokens?: number;
   temperature?: number;
   contextTokens?: number;
+  /** Force the model to call at least one tool on user-message turns. */
+  toolChoice?: "required" | "none" | "auto";
   approve: (request: PermissionRequest) => Promise<boolean>;
 }
 
@@ -46,6 +48,7 @@ export class Agent {
   private readonly maxTokens: number;
   private readonly temperature: number | undefined;
   private readonly contextTokens: number;
+  private readonly toolChoice: "required" | "none" | "auto";
   private readonly approve: (request: PermissionRequest) => Promise<boolean>;
 
   constructor(private readonly options: AgentOptions) {
@@ -54,7 +57,24 @@ export class Agent {
     this.maxTokens = options.maxTokens ?? 8192;
     this.temperature = options.temperature;
     this.contextTokens = options.contextTokens ?? 200_000;
+    this.toolChoice = options.toolChoice ?? "auto";
     this.approve = options.approve;
+  }
+
+  /** Detect a tool-calling loop: same tool+args repeated 3+ times in a row. */
+  private isToolLoop(
+    recentCalls: Array<{ name: string; arguments: string }>,
+  ): boolean {
+    if (recentCalls.length < 3) return false;
+    const last = recentCalls[recentCalls.length - 1]!;
+    const secondLast = recentCalls[recentCalls.length - 2]!;
+    const thirdLast = recentCalls[recentCalls.length - 3]!;
+    return (
+      last.name === secondLast.name &&
+      last.name === thirdLast.name &&
+      last.arguments === secondLast.arguments &&
+      last.arguments === thirdLast.arguments
+    );
   }
 
   get session(): Session {
@@ -92,6 +112,7 @@ export class Agent {
 
         let assistantText = "";
         const toolCalls: ToolCall[] = [];
+        const recentToolCalls: Array<{ name: string; arguments: string }> = [];
         let stepUsage: Usage = { ...EMPTY_USAGE };
         let doneReason: string = "stop";
 
@@ -108,6 +129,7 @@ export class Agent {
             maxTokens: this.maxTokens,
             ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
             ...(signal ? { signal } : {}),
+            toolChoice: this.toolChoice,
           })) {
             switch (event.type) {
               case "text":
@@ -121,6 +143,7 @@ export class Agent {
 
               case "tool_call":
                 toolCalls.push(event.call);
+                recentToolCalls.push({ name: event.call.name, arguments: event.call.arguments ?? "{}" });
                 break;
 
               case "usage":
@@ -171,6 +194,26 @@ export class Agent {
         for (const call of toolCalls) {
           if (signal?.aborted) {
             aborted = true;
+            break;
+          }
+
+          // Break tool-calling loops: same tool+args repeated 3+ times in a row.
+          if (this.isToolLoop(recentToolCalls)) {
+            const content = `Stopped: detected a tool-calling loop (${call.name} repeated). Respond to the user directly instead of calling tools again.`;
+            session.messages.push({
+              role: "tool",
+              toolCallId: call.id,
+              name: call.name,
+              content,
+              isError: true,
+            });
+            yield {
+              type: "tool_end",
+              call,
+              content,
+              isError: true,
+              durationMs: 0,
+            };
             break;
           }
 

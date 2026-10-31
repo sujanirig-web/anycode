@@ -6,6 +6,7 @@ import type { PermissionRequest } from "../tools/types.js";
 import type { ToolCall } from "../types.js";
 
 import { color } from "../util/ansi.js";
+import { Waveform } from "../util/waveform.js";
 import { NAME, VERSION } from "../version.js";
 import { handleSlashCommand, type CommandItem, COMMANDS } from "./commands.js";
 import { Editor } from "./editor.js";
@@ -99,6 +100,12 @@ export class Tui {
   private paletteFilter = "";
   private paletteSelected = 0;
 
+  /** Model picker state. */
+  private modelPickerOpen = false;
+  private modelPickerFilter = "";
+  private modelPickerSelected = 0;
+  private modelPickerModels: string[] = [];
+
   /** Activity card navigation. */
   private selectedCardIndex = 0;
   private selectedStepIndex: number | undefined;
@@ -111,6 +118,9 @@ export class Tui {
 
   /** Agent status strip state. */
   private agentStatus: AgentStatusStripInput | undefined;
+
+  /** Animated waveform shown while the agent is working. */
+  private waveform: Waveform;
 
   private readonly done: Promise<void>;
   private resolveDone!: () => void;
@@ -126,10 +136,21 @@ export class Tui {
       this.resolveDone = resolve;
     });
     runtime.broker.handler = (request) => this.ask(request);
+
+    const reducedMotion = process.env.ANYCODE_REDUCED_MOTION === "1";
+    this.waveform = new Waveform({
+      barCount: 13,
+      minHeight: 1,
+      maxHeight: 8,
+      speed: 1.2,
+      color: color.white,
+      active: false,
+      reducedMotion,
+    });
   }
 
   async run(): Promise<void> {
-    this.welcome();
+    this.restoreSession();
     this.enter();
     try {
       await this.done;
@@ -150,13 +171,8 @@ export class Tui {
     this.paint();
   }
 
-  private welcome(): void {
-    this.transcript.welcome({
-      cwd: this.runtime.cwd,
-      provider: this.state.providerId,
-      model: this.state.model,
-      autoApprove: this.runtime.broker.autoApprove,
-    });
+  /** Hydrate an existing session; the active model lives in the composer now. */
+  private restoreSession(): void {
     if (this.state.session.messages.length > 0) {
       this.transcript.info("Resumed session.");
       this.transcript.hydrate(this.state.session);
@@ -210,7 +226,21 @@ export class Tui {
 
   private onData = (chunk: string): void => {
     const events = this.parser.push(chunk);
-    for (const event of events) this.handleKey(event);
+    for (const event of events) {
+      if (this.approval) {
+        this.handleApprovalKey(event);
+        continue;
+      }
+      if (this.modelPickerOpen) {
+        this.handleModelPickerKey(event);
+        continue;
+      }
+      if (this.paletteOpen) {
+        this.handlePaletteKey(event);
+        continue;
+      }
+      this.handleKey(event);
+    }
     if (this.parser.pendingLength > 0) this.scheduleEscapeFlush();
   };
 
@@ -225,6 +255,11 @@ export class Tui {
   private handleKey(event: KeyEvent): void {
     if (this.approval) {
       this.handleApprovalKey(event);
+      return;
+    }
+
+    if (this.modelPickerOpen) {
+      this.handleModelPickerKey(event);
       return;
     }
 
@@ -264,11 +299,18 @@ export class Tui {
       this.paint();
       return;
     }
-    if (name === "pageup") {
+    if (ctrl && name === "m") {
+      this.openModelPicker().catch((error: unknown) => {
+        this.transcript.error(errorMessage(error));
+        this.paint();
+      });
+      return;
+    }
+    if (name === "pageup" || (name === "up" && this.editor.isEmpty)) {
       this.scrollBy(this.pageSize());
       return;
     }
-    if (name === "pagedown") {
+    if (name === "pagedown" || (name === "down" && this.editor.isEmpty)) {
       this.scrollBy(-this.pageSize());
       return;
     }
@@ -436,6 +478,113 @@ export class Tui {
     });
   }
 
+  /** Fetch available models from the current provider's OpenAI-compatible /models endpoint. */
+  private async fetchModels(): Promise<void> {
+    try {
+      const providers = await this.runtime.listProviders();
+      const current = providers.find((p) => p.id === this.runtime.providerId);
+      const baseURL = current?.baseURL;
+      if (!baseURL) {
+        this.modelPickerModels = [];
+        return;
+      }
+      const res = await fetch(`${baseURL.replace(/\/+$/, "")}/models`);
+      if (res.ok) {
+        const data = await res.json() as { data?: Array<{ id: string }> };
+        if (data.data) {
+          this.modelPickerModels = data.data
+            .map((m) => m.id)
+            .filter((id) => !['anyroute', 'auto', 'free'].includes(id));
+        } else {
+          this.modelPickerModels = [];
+        }
+      } else {
+        this.modelPickerModels = [];
+      }
+    } catch {
+      this.modelPickerModels = [];
+    }
+  }
+
+  /** Open the interactive model picker (called by /models command). */
+  async showModelPicker(): Promise<void> {
+    await this.openModelPicker();
+  }
+
+  /** Open the model picker. */
+  private async openModelPicker(): Promise<void> {
+    this.modelPickerOpen = true;
+    this.modelPickerFilter = "";
+    this.modelPickerSelected = 0;
+    await this.fetchModels();
+    this.paint();
+  }
+
+  /** Close the model picker. */
+  private closeModelPicker(): void {
+    this.modelPickerOpen = false;
+    this.modelPickerFilter = "";
+    this.modelPickerSelected = 0;
+    this.modelPickerModels = [];
+    this.paint();
+  }
+
+  private filteredModels(): string[] {
+    const f = this.modelPickerFilter.toLowerCase();
+    if (!f) return this.modelPickerModels;
+    return this.modelPickerModels.filter((m) => m.toLowerCase().includes(f));
+  }
+
+  private async selectModel(): Promise<void> {
+    const models = this.filteredModels();
+    const model = models[this.modelPickerSelected] ?? this.modelPickerFilter.trim();
+    if (!model) {
+      this.closeModelPicker();
+      return;
+    }
+    try {
+      const rebuilt = await this.runtime.rebuild({
+        providerId: this.runtime.providerId,
+        model,
+      });
+      Object.assign(this.state, rebuilt);
+      this.state.session.provider = this.state.providerId;
+      this.state.session.model = this.state.model;
+      this.transcript.info(`Model: ${this.state.providerId}/${this.state.model}`);
+    } catch (error) {
+      this.transcript.error(errorMessage(error));
+    }
+    this.closeModelPicker();
+    this.paint();
+  }
+
+  private renderModelPicker(width: number): string[] {
+    const models = this.filteredModels();
+    if (models.length === 0) {
+      return [color.dim("  No models found.")];
+    }
+
+    const lines: string[] = [];
+    lines.push(color.bold(color.magenta(` Select Model (${this.runtime.providerId})`)));
+    lines.push("");
+
+    const maxShow = Math.max(1, Math.floor(width / 2) - 2);
+    const start = Math.max(0, this.modelPickerSelected - Math.floor(maxShow / 2));
+    const end = Math.min(models.length, start + maxShow);
+
+    for (let i = start; i < end; i++) {
+      const model = models[i];
+      if (!model) continue;
+      const isSelected = i === this.modelPickerSelected;
+      const marker = isSelected ? "▸ " : "  ";
+      const namePart = color.bold(color.cyan(model));
+      const line = `  ${marker}${namePart}`;
+      lines.push(isSelected ? color.inverse(line) : line);
+    }
+
+    return lines;
+  }
+
   /** Render the command palette overlay lines. */
   private renderPalette(width: number): string[] {
     const cmds = this.filteredCommands();
@@ -464,6 +613,48 @@ export class Tui {
     }
 
     return lines;
+  }
+
+  private handleModelPickerKey(event: KeyEvent): void {
+    if (event.type === "text") {
+      this.modelPickerFilter += event.text;
+      this.modelPickerSelected = 0;
+      this.paint();
+      return;
+    }
+    if (event.type === "key") {
+      if (event.name === "escape" || (event.ctrl && event.name === "c")) {
+        this.closeModelPicker();
+        return;
+      }
+      if (event.name === "backspace") {
+        this.modelPickerFilter = this.modelPickerFilter.slice(0, -1);
+        this.modelPickerSelected = 0;
+        this.paint();
+        return;
+      }
+      if (event.name === "up") {
+        const models = this.filteredModels();
+        if (models.length === 0) return;
+        this.modelPickerSelected = (this.modelPickerSelected - 1 + models.length) % models.length;
+        this.paint();
+        return;
+      }
+      if (event.name === "down") {
+        const models = this.filteredModels();
+        if (models.length === 0) return;
+        this.modelPickerSelected = (this.modelPickerSelected + 1) % models.length;
+        this.paint();
+        return;
+      }
+      if (event.name === "enter") {
+        this.selectModel().catch((error: unknown) => {
+          this.transcript.error(errorMessage(error));
+          this.paint();
+        });
+        return;
+      }
+    }
   }
 
   private handleApprovalKey(event: KeyEvent): void {
@@ -559,12 +750,6 @@ export class Tui {
 
       if (this.state.session.id !== before) {
         this.transcript.clear();
-        this.transcript.welcome({
-          cwd: this.runtime.cwd,
-          provider: this.state.providerId,
-          model: this.state.model,
-          autoApprove: this.runtime.broker.autoApprove,
-        });
         if (this.state.session.messages.length > 0) this.transcript.hydrate(this.state.session);
       }
 
@@ -587,8 +772,12 @@ export class Tui {
 
     const controller = new AbortController();
     this.busy = { controller, label: "thinking", startedAt: Date.now() };
+    this.waveform.setActive(true);
     this.tick = setInterval(() => this.paint(), TICK_MS);
     this.paint();
+
+    const minBusyMs = 800;
+    const turnStarted = Date.now();
 
     try {
       for await (const event of this.state.agent.run(text, { signal: controller.signal })) {
@@ -597,10 +786,17 @@ export class Tui {
     } catch (error) {
       if (!controller.signal.aborted) this.transcript.error(errorMessage(error));
     } finally {
+      // Keep the waveform visible for at least minBusyMs so short turns
+      // don't flash and disappear before the user can see them.
+      const elapsed = Date.now() - turnStarted;
+      if (elapsed < minBusyMs) {
+        await new Promise((resolve) => setTimeout(resolve, minBusyMs - elapsed));
+      }
       if (this.tick) {
         clearInterval(this.tick);
         this.tick = undefined;
       }
+      this.waveform.setActive(false);
       this.busy = undefined;
       await this.state.session.save().catch(() => undefined);
       this.paint();
@@ -685,7 +881,10 @@ export class Tui {
 
   private compose(width: number, height: number, lines: string[]): Frame {
     // If the command palette is open, overlay it on top of the transcript.
-    if (this.paletteOpen) {
+    if (this.modelPickerOpen) {
+      const picker = this.renderModelPicker(width);
+      lines = [...picker, ...lines];
+    } else if (this.paletteOpen) {
       const palette = this.renderPalette(width);
       lines = [...palette, ...lines];
     }
@@ -707,26 +906,31 @@ export class Tui {
           }
         : {}),
       usage: this.state.session.usage,
+      model: {
+        provider: this.state.providerId,
+        model: this.state.model,
+        autoApprove: this.runtime.broker.autoApprove,
+      },
       agentName: "Cavehound",
       agentMode: this.busy ? "running" : "idle",
-      agentStatus: this.buildAgentStatus(),
+      agentStatus: this.buildAgentStatus(width),
       });
   }
 
   /** Build the agent status strip input from current Tui state. */
-  private buildAgentStatus(): AgentStatusStripInput | undefined {
+  private buildAgentStatus(width: number): AgentStatusStripInput | undefined {
     if (this.busy) {
       const elapsed = (Date.now() - this.busy.startedAt) / 1000;
       const frame = SPINNER[Math.floor(elapsed * 10) % SPINNER.length] ?? "⠴";
-      const buffer = BUFFER[Math.floor(elapsed * 20) % BUFFER.length] ?? "█";
-      const seconds = elapsed.toFixed(elapsed >= 10 ? 0 : 1);
+      const waveform = this.waveform.render(width, Date.now());
       return {
         status: "working",
+        frame,
+        waveform,
         currentIntent: this.busy.label,
         currentStep: undefined,
         totalSteps: undefined,
         durationMs: elapsed * 1000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
       };
     }
 
@@ -749,7 +953,7 @@ export class Tui {
 
     const width = clamp(output.columns ?? 80, 20, 400);
     const height = Math.max(6, output.rows ?? 24);
-    const lines = this.transcript.render(Math.max(10, width - 2), this.expanded);
+    const lines = this.transcript.render(Math.max(10, width - 2), this.expanded, Date.now());
 
     let frame = this.compose(width, height, lines);
     const maxScroll = Math.max(0, lines.length - frame.bodyHeight);

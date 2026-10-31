@@ -22,6 +22,21 @@ export const color = {
 
 export const colorEnabled = !NO_COLOR;
 
+/** Black canvas behind the conversation and the surrounding chrome. */
+export function panelBackground(text: string): string {
+  return NO_COLOR ? text : `\u001b[48;5;16m${text}\u001b[49m`;
+}
+
+/** Slightly lighter surface reserved for the composer. */
+export function composerBackground(text: string): string {
+  return NO_COLOR ? text : `\u001b[48;5;234m${text}\u001b[49m`;
+}
+
+/** Black background for chrome outside the composer. */
+export function chromeBackground(text: string): string {
+  return NO_COLOR ? text : `\u001b[48;5;16m${text}\u001b[49m`;
+}
+
 /** Remove ANSI escape sequences (useful for measuring visible width). */
 export function stripAnsi(text: string): string {
   // eslint-disable-next-line no-control-regex

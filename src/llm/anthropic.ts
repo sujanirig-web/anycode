@@ -140,6 +140,9 @@ export class AnthropicProvider implements Provider {
     };
     if (tools.length > 0) body.tools = tools;
     if (request.temperature !== undefined) body.temperature = request.temperature;
+    if (request.toolChoice === "required") body.tool_choice = { type: "required" };
+    else if (request.toolChoice === "none") body.tool_choice = { type: "none" };
+    else if (request.toolChoice === "auto") body.tool_choice = { type: "auto" };
 
     const response = await postStream({
       url: `${this.baseURL}/messages`,

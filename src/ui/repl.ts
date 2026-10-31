@@ -132,6 +132,49 @@ export async function runRepl(runtime: InteractiveRuntime): Promise<void> {
     error: (message: string, hint?: string) => renderer.error(message, hint),
   };
 
+  /** Interactive model picker for the REPL: list models and pick by number. */
+  async function showModelPickerRepl(): Promise<void> {
+    try {
+      const res = await fetch("http://127.0.0.1:3456/v1/models");
+      if (!res.ok) {
+        renderer.error("Could not reach anyroute gateway. Is it running?");
+        return;
+      }
+      const data = await res.json() as { data?: Array<{ id: string }> };
+      const models = (data.data ?? [])
+        .map((m) => m.id)
+        .filter((id) => !["anyroute", "auto", "free"].includes(id));
+      if (models.length === 0) {
+        renderer.info("No models available from anyroute.");
+        return;
+      }
+
+      renderer.info("Available models:");
+      models.forEach((m, i) => {
+        renderer.info(`  ${i + 1}. ${m}`);
+      });
+
+      const answer = await rl.question(
+        color.cyan("Pick a model number (or Enter to cancel): "),
+        { signal: closed.signal },
+      );
+      const n = Number.parseInt(answer.trim(), 10);
+      if (!Number.isFinite(n) || n < 1 || n > models.length) {
+        renderer.info("Cancelled.");
+        return;
+      }
+
+      const model = models[n - 1];
+      const rebuilt = await runtime.rebuild({ providerId: "anyroute", model });
+      Object.assign(state, rebuilt);
+      state.session.provider = state.providerId;
+      state.session.model = state.model;
+      renderer.info(`Model: ${state.providerId}/${state.model}`);
+    } catch (error) {
+      renderer.error(errorMessage(error));
+    }
+  }
+
   try {
     for (;;) {
       let line: string;

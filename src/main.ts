@@ -15,8 +15,8 @@ import { Spinner } from "./util/spinner.js";
 import { oneLine } from "./util/text.js";
 import { createAskPermission } from "./ui/ask.js";
 import { Renderer } from "./ui/renderer.js";
+import { Tui } from "./ui/tui.js";
 import { runRepl, type ReplRuntime } from "./ui/repl.js";
-import { runTui } from "./ui/tui.js";
 import { NAME, VERSION } from "./version.js";
 
 const OPTIONS = {
@@ -26,7 +26,7 @@ const OPTIONS = {
   provider: { type: "string", short: "p" },
   "base-url": { type: "string" },
   "api-key": { type: "string" },
-  yolo: { type: "boolean", short: "y" },
+  ask: { type: "boolean" },
   json: { type: "boolean" },
   session: { type: "string", short: "s" },
   continue: { type: "boolean", short: "c" },
@@ -54,7 +54,9 @@ Options:
       --api-key <key>         Override the API key (prefer environment variables)
   -s, --session <id>          Resume a specific session
   -c, --continue              Continue the most recent session
-  -y, --yolo                  Auto-approve write, edit and bash (no prompts)
+  -a, --ask                   Require permission before mutating tools (auto-approve
+                              is on by default; set "autoApprove: false" in config to
+                              always require prompts)
       --json                  Stream events as newline-delimited JSON
       --cwd <dir>             Run against another working directory
       --no-tui                Use the plain line REPL instead of the full-screen UI
@@ -189,7 +191,7 @@ export async function main(argv: string[]): Promise<number> {
     ...(values.model ? { model: values.model } : {}),
     ...(values["base-url"] ? { baseURL: values["base-url"] } : {}),
     ...(values["api-key"] ? { apiKey: values["api-key"] } : {}),
-    ...(values.yolo ? { autoApprove: true } : {}),
+    ...(values.ask ? { autoApprove: false } : {}),
   };
   const maxSteps = toPositiveInt(values["max-steps"], "max-steps");
   const maxTokens = toPositiveInt(values["max-tokens"], "max-tokens");
@@ -315,9 +317,19 @@ export async function main(argv: string[]): Promise<number> {
       saveProvider: async (id, preset) => {
         await saveProviderPreset(id, preset);
       },
+      showModelPicker: async () => {
+        // Implemented per-mode below (TUI vs REPL).
+        throw new Error("Model picker not available in this mode.");
+      },
     };
 
-    await (useTui ? runTui(runtime) : runRepl(runtime));
+    if (useTui) {
+      const tui = new Tui(runtime);
+      runtime.showModelPicker = tui.showModelPicker.bind(tui);
+      await tui.run();
+    } else {
+      await runRepl(runtime);
+    }
     return 0;
   }
 

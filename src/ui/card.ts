@@ -10,6 +10,18 @@ const TREE_ICONS = {
   error: "✗",
 };
 
+/**
+ * Animated running glyph: a single block bar that rises and falls, so the
+ * tool line stays the same width while it looks like a tiny wave.
+ */
+const RUNNING_WAVE = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█", "▇", "▆", "▅", "▄", "▃", "▂"];
+
+function runningGlyph(nowMs: number | undefined): string {
+  if (nowMs === undefined) return TREE_ICONS.running;
+  const index = Math.floor(nowMs / 90) % RUNNING_WAVE.length;
+  return RUNNING_WAVE[index] ?? TREE_ICONS.running;
+}
+
 const TREE_COLORS = {
   running: color.gray,
   ok: color.gray,
@@ -36,6 +48,7 @@ export function renderCardPanel(
   card: ActivityCard,
   width: number,
   selectedStepIndex: number | undefined = undefined,
+  nowMs?: number,
 ): string[] {
   // Guard: never render an empty card
   if (!card.steps || card.steps.length === 0) return [];
@@ -69,7 +82,8 @@ export function renderCardPanel(
     const step = card.steps[i]!;
     const isLast = i === card.steps.length - 1;
     const treePrefix = isLast ? "└─ " : "├─ ";
-    const icon = TREE_COLORS[step.status](TREE_ICONS[step.status]);
+    const glyph = step.status === "running" ? runningGlyph(nowMs) : TREE_ICONS[step.status];
+    const icon = TREE_COLORS[step.status](glyph);
     const name = color.gray(step.tool);
     const detail = color.dim(step.summary);
     const timing =

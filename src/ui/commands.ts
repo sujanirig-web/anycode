@@ -27,6 +27,7 @@ export const COMMANDS: CommandItem[] = [
   { name: "new", desc: "Start a new session", args: "(alias: /clear)" },
   { name: "clear", desc: "Start a new session", args: "(alias: /new)" },
   { name: "model", desc: "Show or change the model", args: "[name]" },
+  { name: "models", desc: "Browse and pick a model from the provider" },
   { name: "provider", desc: "Change the provider", args: "[id] [model]" },
   { name: "providers", desc: "List available providers", args: "[add <id> <model> <url>]" },
   { name: "sessions", desc: "List saved sessions" },
@@ -42,6 +43,7 @@ export const SLASH_HELP = `Commands
   /help              Show this help
   /new               Start a new session (alias: /clear)
   /model [name]      Show or change the model
+  /models            Browse and pick a model from the provider
   /provider [id]     Change the provider (optionally with a model)
   /providers         List available providers
   /providers add <id> <model> <base-url>  Add a custom provider preset
@@ -109,6 +111,15 @@ export async function handleSlashCommand(
       } catch (error) {
         sink.error(errorMessage(error));
       }
+      return false;
+    }
+
+    case "models": {
+      if (typeof host.showModelPicker === "function") {
+        await host.showModelPicker();
+        return false;
+      }
+      sink.error("Model picker is only available in the interactive TUI.");
       return false;
     }
 

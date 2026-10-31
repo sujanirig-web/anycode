@@ -71,7 +71,11 @@ export function buildSystemPrompt(options: SystemPromptOptions): string {
 - Never print secrets, API keys, tokens, or .env contents.
 - Do not create git commits, push, install dependencies, or run destructive commands unless the user asks.
 - If you are blocked, state the exact blocker and the best next step instead of guessing.
-- Keep prose short. Prefer doing over explaining.`,
+- Keep prose short. Prefer doing over explaining.
+- Do NOT call tools for simple greetings, questions, or conversational replies — answer directly in text. Only use tools when the user asks you to read, write, edit, run, or find something concrete.
+
+# File operations (mandatory)
+When the user asks you to create, write, or modify a file, you MUST use the write tool (for new files) or edit tool (for existing files). Do not just describe, explain, or show code snippets in chat — actually write the file to disk using the tools. The user expects a real file to be created, not a verbal answer.`,
     `# Tool notes
 - read, list, glob and grep are read-only and safe to call freely.
 - write, edit, delete, copy, move, mkdir and bash require user approval unless auto-approve is enabled.

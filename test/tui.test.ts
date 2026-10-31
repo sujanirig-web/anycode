@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { Session } from "../src/agent/session.js";
+import { colorEnabled } from "../src/util/ansi.js";
 import { Editor } from "../src/ui/editor.js";
 import { KeyParser } from "../src/ui/keys.js";
 import { composeFrame } from "../src/ui/screen.js";
@@ -205,10 +206,147 @@ describe("composeFrame", () => {
     assert.ok(result.cursor.col <= 80);
   });
 
+  it("anchors the footer to the bottom edge below the composer", () => {
+    const idle = frame();
+    assert.match(plain(idle.lines.at(-1) ?? ""), /attach · commands · run/);
+    assert.equal(plain(idle.lines.at(-2) ?? "").trim(), "");
+    assert.equal(plain(idle.lines.at(-3) ?? "").trim(), "");
+    assert.equal(plain(idle.lines.at(-4) ?? "").trim(), "");
+    assert.equal(plain(idle.lines.at(-5) ?? "").trim(), "");
+    assert.match(plain(idle.lines.at(-6) ?? ""), /next question/);
+
+    const running = frame({
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "step 1",
+        waveform: "▁ ▂ ▃",
+      },
+    });
+    assert.equal(running.lines.length, 24);
+    assert.match(plain(running.lines.at(-1) ?? ""), /attach · commands · run/);
+    assert.equal(plain(running.lines.at(-2) ?? "").trim(), "");
+    assert.equal(plain(running.lines.at(-3) ?? "").trim(), "");
+  });
+
+  it("moves the hint out of the composer as a plain footer", () => {
+    const result = frame({
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "thinking",
+        waveform: "▁ ▂ ▃",
+      },
+    });
+    const lines = result.lines.map(plain);
+    const waveIdx = lines.findIndex((line) => line.includes("▁ ▂ ▃"));
+    const hintIdx = lines.findIndex((line) => line.includes("attach · commands · run"));
+    const composerIdx = lines.findIndex((line) => line.startsWith("▌"));
+    assert.ok(waveIdx >= 0, "Waveform should be visible");
+    assert.match(lines[waveIdx] ?? "", /^▌ ▁ ▂ ▃/);
+    assert.ok(hintIdx > composerIdx, "Hint should sit below the composer");
+    assert.ok(!(lines[hintIdx] ?? "").includes("▌"), "Hint should not use the composer rail");
+  });
+
   it("keeps working on small terminals", () => {
     const result = frame({ width: 40, height: 8, composer: { text: "hi", cursor: 2 } });
     assert.equal(result.lines.length, 8);
     for (const line of result.lines) assert.ok(stringWidth(line) <= 40, line);
+  });
+
+  it("renders the model line directly below the waveform", () => {
+    const result = frame({
+      agentMode: "running",
+      model: { provider: "anyroute", model: "anyroute", autoApprove: true },
+      agentStatus: {
+        status: "working",
+        currentIntent: "thinking",
+        waveform: "▁ ▂ ▃",
+      },
+    });
+    const lines = result.lines.map(plain);
+    const waveIdx = lines.findIndex((line) => line.includes("▁ ▂ ▃"));
+    const modelIdx = lines.findIndex((line) => line.includes("model:"));
+    assert.ok(waveIdx >= 0, "Waveform should be visible");
+    assert.equal(modelIdx, waveIdx + 1, "Model row should be directly below the waveform");
+    assert.match(lines[modelIdx] ?? "", /model:\s+anyroute\/anyroute\s+\(auto-approve\)/);
+  });
+
+  it("keeps the waveform and model row from colliding on narrow terminals", () => {
+    const result = frame({
+      width: 20,
+      height: 12,
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      model: { provider: "anyroute", model: "anyroute", autoApprove: true },
+      agentStatus: {
+        status: "working",
+        currentIntent: "thinking",
+        waveform: "▁ ▂ ▃ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄ ▃",
+      },
+    });
+    const lines = result.lines.map(plain);
+    const waveIdx = lines.findIndex((line) => line.includes("▁"));
+    const modelIdx = lines.findIndex((line) => line.includes("model:"));
+    assert.ok(waveIdx >= 0, "Waveform should be visible");
+    assert.equal(modelIdx, waveIdx + 1, "Model row should be directly below the waveform");
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 20, line);
+  });
+
+  it("shows only usage after removing the provider/cwd label", () => {
+    const result = frame({
+      showHeader: false,
+      usage: { inputTokens: 21, outputTokens: 7 },
+      model: { provider: "anyroute", model: "anyroute", autoApprove: true },
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.ok(!text.includes("anyroute · ~/projects"), "provider/cwd label should be gone");
+    assert.match(text, /21 in · 7 out/);
+  });
+
+  it("darkens the canvas but keeps only the composer on its lighter surface", () => {
+    const result = frame({
+      transcript: ["hello", "world"],
+      composer: { text: "next question", cursor: 13 },
+      usage: { inputTokens: 0, outputTokens: 0 },
+      model: { provider: "anyroute", model: "anyroute", autoApprove: true },
+    });
+    const lines = result.lines.map(plain);
+    const canvas = result.lines.filter((line) => line.includes("\u001b[48;5;16m"));
+    const composer = result.lines.filter((line) => line.includes("\u001b[48;5;234m"));
+
+    if (!colorEnabled) {
+      assert.equal(canvas.length, 0);
+      assert.equal(composer.length, 0);
+      return;
+    }
+
+    assert.ok(canvas.length >= 4, "canvas rows should use the black background");
+    assert.equal(composer.length, 6, "only the composer rows use the lighter surface");
+    const composerIdx = lines.findIndex((line) => line.startsWith("▌"));
+    assert.ok(composerIdx > 0, "composer should be visible");
+    for (let i = composerIdx; i < composerIdx + 6; i++) {
+      assert.ok(
+        (result.lines[i] ?? "").includes("\u001b[48;5;234m"),
+        "composer rows should use the composer surface",
+      );
+      assert.ok(
+        !(result.lines[i] ?? "").includes("\u001b[48;5;16m"),
+        "composer rows should not use the canvas background",
+      );
+    }
+    for (let i = composerIdx + 6; i < result.lines.length; i++) {
+      assert.ok(
+        !(result.lines[i] ?? "").includes("\u001b[48;5;234m"),
+        "rows below the composer should not use the composer surface",
+      );
+      assert.ok(
+        (result.lines[i] ?? "").includes("\u001b[48;5;16m"),
+        "rows below the composer should use the black canvas",
+      );
+    }
   });
 
   it("shows approval panel inside activity card", () => {
@@ -245,6 +383,26 @@ describe("composeFrame", () => {
     assert.match(text, /\[y\]/);
     assert.match(text, /\[a\]/);
     assert.match(text, /\[n\]/);
+  });
+
+  it("animates running tool glyphs as a wave", () => {
+    const card: ActivityCard = {
+      id: "card-wave",
+      intent: "Running shell command",
+      status: "running",
+      steps: [{ id: "s1", tool: "bash", status: "running", summary: "ls" }],
+      expanded: true,
+    };
+    const transcript = new Transcript();
+    transcript.pushActivity(card);
+
+    const first = transcript.render(78, false, 0).join("\n");
+    const later = transcript.render(78, false, 180).join("\n");
+    const staticFrame = transcript.render(78, false).join("\n");
+
+    assert.ok(!first.includes("⋯"), "running glyph should animate");
+    assert.notEqual(first, later, "wave should move between frames");
+    assert.match(staticFrame, /⋯/, "static rendering keeps the old glyph");
   });
 
   it("indicates scrollback when scrolled up", () => {
@@ -343,7 +501,7 @@ describe("composeFrame", () => {
     assert.ok(!text.includes("✗"), "Should not contain error icon");
   });
 
-  it("working state shows spinner, status, step, duration, and shortcuts", () => {
+  it("working state shows spinner, status, step, and duration", () => {
     const result = frame({
       agentName: "Cavehound",
       agentMode: "running",
@@ -354,17 +512,17 @@ describe("composeFrame", () => {
         currentStep: 4,
         totalSteps: 10,
         durationMs: 669000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
       },
     });
     const text = result.lines.map(plain).join("\n");
     assert.match(text, /⠴ Working/);
     assert.match(text, /step 4/);
     assert.match(text, /11m 9s/);
-    assert.match(text, /Tab queue · Esc interrupt/);
+    assert.ok(!text.includes("Tab queue"), "Tab queue hint should be removed");
+    assert.ok(!text.includes("Esc interrupt"), "Esc interrupt hint should be removed");
   });
 
-  it("Tab queue shortcut is not prefixed with ▌", () => {
+  it("status strip shortcuts are not prefixed with ▌", () => {
     const result = frame({
       agentName: "Cavehound",
       agentMode: "running",
@@ -375,14 +533,14 @@ describe("composeFrame", () => {
         currentStep: 4,
         totalSteps: 10,
         durationMs: 669000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
+        relevantShortcuts: "f1 help · f2 output",
       },
     });
     const text = result.lines.map(plain).join("\n");
     // The ▌ character should only appear on composer lines, not status strip
     const lines = text.split("\n");
-    const statusLine = lines.find((l) => l.includes("Tab queue"));
-    assert.ok(statusLine, "Tab queue line should exist");
+    const statusLine = lines.find((l) => l.includes("f1 help"));
+    assert.ok(statusLine, "shortcut line should exist");
     assert.ok(!statusLine.includes("▌"), "Status strip should not have ▌ rail");
   });
 
@@ -397,7 +555,6 @@ describe("composeFrame", () => {
         currentStep: 4,
         totalSteps: 10,
         durationMs: 669000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
       },
     });
     const text = result.lines.map(plain).join("\n");
@@ -456,7 +613,6 @@ describe("composeFrame", () => {
         currentStep: 4,
         totalSteps: 10,
         durationMs: 669000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
       },
     });
     const text = result.lines.map(plain).join("\n");
@@ -473,26 +629,4 @@ describe("composeFrame", () => {
     assert.ok(between.length === 1, "Exactly one blank line between status strip and composer");
   });
 
-  it("narrow terminal truncates intent without pushing shortcuts into composer", () => {
-    const result = frame({
-      width: 40,
-      height: 20,
-      agentName: "Cavehound",
-      agentMode: "running",
-      composer: { text: "", cursor: 0 },
-      agentStatus: {
-        status: "working",
-        currentIntent: "This is a very long intent that should be truncated because the terminal is narrow",
-        currentStep: 4,
-        totalSteps: 10,
-        durationMs: 669000,
-        relevantShortcuts: "Tab queue · Esc interrupt",
-      },
-    });
-    const text = result.lines.map(plain).join("\n");
-    const statusLine = text.split("\n").find((l) => l.includes("⠴ Working"));
-    assert.ok(statusLine, "Status line should exist");
-    // The shortcuts should still be visible on the status line
-    assert.ok(statusLine.includes("Tab queue · Esc interrupt"), "Shortcuts should remain visible");
-  });
 });

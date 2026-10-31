@@ -67,6 +67,8 @@ export interface ProviderRequest {
   maxTokens: number;
   temperature?: number;
   signal?: AbortSignal;
+  /** When 'required', the model must call at least one tool on this turn. */
+  toolChoice?: "required" | "none" | "auto";
 }
 
 export interface Provider {

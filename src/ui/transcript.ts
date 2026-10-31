@@ -12,6 +12,7 @@ type BlockKind = "user" | "assistant" | "tool" | "result" | "notice" | "error" |
 interface RenderCache {
   width: number;
   expanded: boolean;
+  frame: number | undefined;
   lines: string[];
 }
 
@@ -195,14 +196,6 @@ export class Transcript {
     this.blocks.push({ kind: "info", text: message });
   }
 
-  welcome(options: { cwd: string; provider: string; model: string; autoApprove: boolean }): void {
-    const modelText = `${options.provider}/${options.model}${options.autoApprove ? "  (auto-approve)" : ""}`;
-    const lines = [
-      `${color.bold(color.magenta("model:"))}  ${color.white(modelText)}`,
-    ];
-    this.blocks.push({ kind: "info", text: lines.join("\n") });
-  }
-
   hydrate(session: Session): void {
     for (const message of session.messages) {
       if (message.role === "user") {
@@ -215,11 +208,28 @@ export class Transcript {
     }
   }
 
-  render(width: number, expanded: boolean): string[] {
+  render(width: number, expanded: boolean, animationFrame?: number): string[] {
     const out: string[] = [];
     for (const block of this.blocks) {
-      if (block.cache?.width !== width || block.cache.expanded !== expanded) {
-        block.cache = { width, expanded, lines: this.renderBlock(block, width, expanded) };
+      // Only live activity cards need a per-tick cache key; everything else
+      // stays cached until its content or width changes.
+      const frame =
+        animationFrame !== undefined &&
+        block.kind === "activity" &&
+        block.card?.steps.some((step) => step.status === "running")
+          ? animationFrame
+          : undefined;
+      if (
+        block.cache?.width !== width ||
+        block.cache.expanded !== expanded ||
+        block.cache.frame !== frame
+      ) {
+        block.cache = {
+          width,
+          expanded,
+          frame,
+          lines: this.renderBlock(block, width, expanded, frame),
+        };
       }
       if (out.length > 0) out.push("");
       out.push(...(block.cache?.lines ?? []));
@@ -228,7 +238,7 @@ export class Transcript {
     return out;
   }
 
-  private renderBlock(block: Block, width: number, expanded: boolean): string[] {
+  private renderBlock(block: Block, width: number, expanded: boolean, animationFrame?: number): string[] {
     switch (block.kind) {
       case "user": {
         const wrapped = wrapText(block.text, Math.max(1, width - 2));
@@ -251,7 +261,7 @@ export class Transcript {
       case "activity": {
         const card = block.card;
         if (!card || card.steps.length === 0) return [];
-        return renderCardPanel(card, Math.max(10, width - 2));
+        return renderCardPanel(card, Math.max(10, width - 2), undefined, animationFrame);
       }
 
       case "result": {

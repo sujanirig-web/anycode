@@ -211,6 +211,12 @@ export async function loadConfig(
     pickString(project, "apiKey") ??
     pickString(global, "apiKey");
 
+  // `autoApprove` defaults to `true` so normal startup can write files and run
+  // commands without the `--yolo` flag. An explicit `false` in a config layer
+  // (or `--ask` on the CLI) still requires permission prompts.
+  const projectAutoApprove = pickBoolean(project, "autoApprove");
+  const globalAutoApprove = pickBoolean(global, "autoApprove");
+
   return {
     provider,
     model,
@@ -240,10 +246,13 @@ export async function loadConfig(
       defaults.contextTokens ??
       200_000,
     autoApprove:
-      overrides.autoApprove ??
-      pickBoolean(project, "autoApprove") ??
-      pickBoolean(global, "autoApprove") ??
-      false,
+      overrides.autoApprove !== undefined
+        ? overrides.autoApprove
+        : projectAutoApprove !== undefined
+          ? projectAutoApprove
+          : globalAutoApprove !== undefined
+            ? globalAutoApprove
+            : true,
   };
 }
 

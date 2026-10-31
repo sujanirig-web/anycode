@@ -123,6 +123,8 @@ export class OpenAIProvider implements Provider {
       stream_options: { include_usage: true },
     };
     if (tools.length > 0) body.tools = tools;
+    if (request.toolChoice === "required") body.tool_choice = "required";
+    else if (request.toolChoice === "none") body.tool_choice = "none";
     if (usesCompletionTokens(request.model)) {
       body.max_completion_tokens = request.maxTokens;
     } else {

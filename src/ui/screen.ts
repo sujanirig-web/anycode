@@ -1,10 +1,16 @@
-import { color } from "../util/ansi.js";
+import { chromeBackground, color, composerBackground, panelBackground, stripAnsi } from "../util/ansi.js";
 import { padToWidth, stringWidth, truncateWidth } from "../util/width.js";
-import { wrapText } from "../util/wrap.js";
 
 export interface ApprovalView {
   title: string;
   detail?: string;
+}
+
+/** Active model info shown inside the composer. */
+export interface ModelInfo {
+  provider: string;
+  model: string;
+  autoApprove: boolean;
 }
 
 export interface FrameInput {
@@ -20,8 +26,10 @@ export interface FrameInput {
   scroll: number;
   composer: { text: string; cursor: number };
   approval?: ApprovalView;
-  /** Token usage for compact display in composer context row. */
+  /** Token usage for compact right-aligned display in the composer. */
   usage?: { inputTokens: number; outputTokens: number };
+  /** Active provider/model shown in the composer below the waveform. */
+  model?: ModelInfo;
   /** Agent name for composer placeholder (e.g. "Cavehound", "Atlas"). */
   agentName?: string;
   /** Current agent mode for placeholder derivation. */
@@ -42,6 +50,10 @@ export interface AgentStatusStripInput {
   totalSteps?: number;
   durationMs?: number;
   relevantShortcuts?: string;
+  /** Animated spinner frame shown when status is "working". */
+  frame?: string;
+  /** Animated waveform bars shown when status is "working". Replaces `frame` when set. */
+  waveform?: string;
 }
 
 export interface Frame {
@@ -103,15 +115,22 @@ export function sideBySide(left: string, right: string, width: number): string {
 export function renderStatusStrip(input: AgentStatusStripInput, width: number): string[] {
   const lines: string[] = [];
 
-  const { status, currentIntent, currentStep, totalSteps, durationMs, relevantShortcuts } = input;
+  const {
+    status,
+    currentIntent,
+    currentStep,
+    totalSteps,
+    durationMs,
+    relevantShortcuts,
+  } = input;
 
   const statusText = statusTextFor(status);
   const statusColor = statusColorFor(status);
-  const icon = statusIconFor(status);
 
   // Build the left portion: icon + status + step info + duration
   // Format: icon statusText · step X · duration · intent
   const leftParts: string[] = [];
+  const icon = status === "working" && input.frame ? input.frame : statusIconFor(status);
   leftParts.push(`${icon} ${statusText}`);
 
   if (currentStep !== undefined && totalSteps !== undefined) {
@@ -200,11 +219,16 @@ function formatDuration(ms: number): string {
 
 /**
  * Render the Cavehound bottom composer with left accent rail and right-aligned context.
- * The composer must contain only:
+ * The composer contains only:
  *   - Input row with the "▌" rail and placeholder/text
  *   - Optional second input line for multiline text
- *   - Hint row: "attach · commands · run"
- *   - Context/shortcut row, right-aligned
+ *   - Usage row (right-aligned)
+ *   - Waveform row (left-aligned) while the agent is running
+ *   - Model row (left-aligned) below the waveform
+ *   - Bottom padding row
+ *
+ * The "attach · commands · run" hint is rendered outside the interface on the
+ * bottom edge, below the composer gap, so it never shares the input rail.
  */
 export function renderCavehoundComposer(
   composer: { text: string; cursor: number },
@@ -212,6 +236,8 @@ export function renderCavehoundComposer(
   agentName: string | undefined,
   agentMode: "idle" | "running" | "shell" | "plan" | "file-picker",
   usage?: { inputTokens: number; outputTokens: number },
+  waveform?: string,
+  model?: ModelInfo,
 ): string[] {
   const innerWidth = Math.max(1, width - 4);
   const rail = color.gray("▌");
@@ -225,73 +251,42 @@ export function renderCavehoundComposer(
   // Line 1: rail + placeholder/input
   lines.push(`${rail} ${textColor(visibleText)}`);
 
-  // Line 2: rail + hint row (only when idle, not running)
-  if (agentMode !== "running") {
-    const attach = color.dim("attach");
-    const dot = color.dim("·");
-    const commands = color.dim("commands");
-    const dot2 = color.dim("·");
-    const run = color.dim("run");
-    lines.push(`${rail} ${attach} ${dot} ${commands} ${dot2} ${run}`);
+  // Line 2: token usage only, right-aligned. The provider/cwd label is gone.
+  if (usage) {
+    const usageText = color.gray(formatUsage(usage));
+    lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(usageText) - 2))}${usageText}`);
   }
 
-  // Line 3: context (right-aligned) with usage
-  const provider = color.gray("anyroute");
-  const cwd = color.gray("~/projects");
-  const usagePart = usage ? color.gray(` · ${formatUsage(usage)}`) : "";
-  const context = `${provider} · ${cwd}${usagePart}`;
-  lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(context) - 2))}${context}`);
+  // Line 3: waveform sits below the context while working. Truncate it on
+  // narrow terminals so it can never wrap into the model row.
+  if (agentMode === "running" && waveform) {
+    const wave =
+      stringWidth(waveform) <= innerWidth
+        ? waveform
+        : truncateWidth(stripAnsi(waveform), innerWidth);
+    lines.push(`${rail} ${wave}`);
+  }
 
-  // Line 4: shortcuts (right-aligned)
-  const send = color.dim("↵ send");
-  const dot3 = color.dim("·");
-  const newline = color.dim("⇧↵ newline");
-  const dot4 = color.dim("·");
-  const tab = color.dim("Tab queue");
-  const shortcuts = `${send} ${dot3} ${newline} ${dot4} ${tab}`;
-  lines.push(`${rail}${" ".repeat(Math.max(0, innerWidth - stringWidth(shortcuts) - 2))}${shortcuts}`);
+  // Line 4: active model, on its own row below the waveform so the two can
+  // never collide.
+  if (model) {
+    const suffix = model.autoApprove ? "  (auto-approve)" : "";
+    const modelText = `${model.provider}/${model.model}${suffix}`;
+    const fitted = truncateWidth(modelText, Math.max(1, innerWidth - 6));
+    lines.push(`${rail} ${color.magenta("model:")}  ${color.white(fitted)}`);
+  }
+
+  // Bottom padding stretches the composer surface taller.
+  lines.push("", "", "");
 
   return lines;
 }
 
-/**
- * Layout composer for multiline text wrapping (used internally).
- */
-interface ComposerLayout {
-  rows: string[];
-  cursorRow: number;
-  cursorCol: number;
-}
+/** Blank rows kept below the composer; the composer's padding replaces the gap. */
+const COMPOSER_BOTTOM_GAP = 0;
 
-function layoutComposer(
-  composer: { text: string; cursor: number },
-  textWidth: number,
-  maxRows: number,
-  prefix: string,
-  continuation: string,
-): ComposerLayout {
-  const width = Math.max(1, textWidth);
-  const display = composer.text.length === 0 ? [""] : wrapText(composer.text, width);
-  const cursor = clamp(composer.cursor, 0, composer.text.length);
-  const before = composer.text.slice(0, cursor);
-  const prefixLines = before.length === 0 ? [""] : wrapText(before, width);
-  const cursorLine = Math.max(0, prefixLines.length - 1);
-  const cursorColumn = stringWidth(prefixLines[prefixLines.length - 1] ?? "");
-
-  const rows = Math.min(maxRows, Math.max(1, display.length));
-  const scrolled = Math.max(0, cursorLine - (rows - 1));
-  const visible: string[] = [];
-  for (let index = 0; index < rows; index++) {
-    visible.push(display[scrolled + index] ?? "");
-  }
-
-  const prefixWidth = stringWidth(prefix);
-  return {
-    rows: visible.map((line, index) => `${index === 0 ? prefix : continuation}${line}`),
-    cursorRow: clamp(cursorLine - scrolled, 0, rows - 1),
-    cursorCol: prefixWidth + Math.min(cursorColumn, width - 1),
-  };
-}
+/** Plain hint rendered below the composer, outside the input rail. */
+const COMPOSER_FOOTER = "attach · commands · run";
 
 /**
  * Compose a full-screen frame: header, scrollable transcript, status strip,
@@ -304,27 +299,31 @@ export function composeFrame(input: FrameInput): Frame {
   const showHeader = input.showHeader !== false;
   const bordered = width >= 34 && height >= 12;
   const headerRows = showHeader && bordered ? 2 : 0; // header line + blank spacer
-  const borderRows = bordered ? 2 : 0;
 
-  const maxInputRows = Math.max(1, bordered ? height - 8 : 3);
-  const textWidth = bordered ? width - 5 : width - 2;
-  const prefix = bordered ? color.green(" › ") : color.green("› ");
-  const continuation = "   ";
+  const composerLines = renderCavehoundComposer(
+    input.composer,
+    input.width,
+    input.agentName,
+    input.agentMode,
+    input.usage,
+    input.agentStatus?.waveform,
+    input.model,
+  );
+  const statusLines = input.agentStatus ? renderStatusStrip(input.agentStatus, width) : [];
+  // One blank line before the status strip and one between it and the composer.
+  const statusBlockRows = statusLines.length > 0 ? statusLines.length + 1 : 0;
 
-  const composer = layoutComposer(input.composer, textWidth, maxInputRows, prefix, continuation);
-
-  const inputRows = composer.rows.length;
-  const composerHeight = inputRows + borderRows;
-  const bodyTop = bordered ? (showHeader ? 2 : 0) : 0;
-
-  // Status strip takes 1 row when there's an active status
-  const statusStripRows = input.agentStatus ? 1 : 0;
-
-  let bodyHeight = height - bodyTop - composerHeight - headerRows - statusStripRows;
-
-  if (bodyHeight < 1) {
-    bodyHeight = 1;
-  }
+  // Reserve fixed chrome first, then spend whatever is left on the transcript
+  // and the bottom gap. Shrinking the gap keeps small terminals usable.
+  const footerRows = 1;
+  const fixedRows =
+    headerRows + 1 + statusBlockRows + composerLines.length + footerRows;
+  const bottomGap = Math.max(
+    0,
+    Math.min(COMPOSER_BOTTOM_GAP, height - fixedRows - 1),
+  );
+  let bodyHeight = height - fixedRows - bottomGap;
+  if (bodyHeight < 1) bodyHeight = 1;
 
   const lines: string[] = [];
   if (showHeader && bordered) {
@@ -344,31 +343,42 @@ export function composeFrame(input: FrameInput): Frame {
     visible[0] = color.dim(label);
   }
 
-  for (const line of visible) lines.push(truncateWidth(` ${line}`, width));
-
-  // One blank line between transcript content and status strip/composer
-  lines.push("");
+  // Tint the conversation body. Stop one column short of the right edge so
+  // the painter's end-of-line erase cannot clip the last cell.
+  const chatStart = lines.length;
+  for (const line of visible) {
+    const text = truncateWidth(` ${line}`, width - 1);
+    lines.push(panelBackground(padToWidth(text, width - 1)));
+  }
+  const chatEnd = lines.length;
 
   // Status strip (separate from composer, no ▌ rail)
-  if (input.agentStatus) {
-    const statusLines = renderStatusStrip(input.agentStatus, width);
+  if (statusLines.length > 0) {
     lines.push(...statusLines);
     // One blank line between status strip and composer
     lines.push("");
   }
 
-  const composerLines = renderCavehoundComposer(
-    input.composer,
-    input.width,
-    input.agentName,
-    input.agentMode,
-    input.usage,
-  );
   const composerStartRow = lines.length;
   lines.push(...composerLines);
 
-  while (lines.length < height) lines.push("");
-  const frame = lines.slice(0, height);
+  // Optional gap below the composer (the footer normally anchors the edge).
+  for (let index = 0; index < bottomGap; index++) lines.push("");
+
+  while (lines.length < height - 1) lines.push("");
+
+  // Hint footer lives outside the interface, pinned to the bottom edge.
+  lines.push(color.dim(truncateWidth(COMPOSER_FOOTER, width)));
+
+  // Darken the whole canvas; keep only the composer on its lighter surface.
+  const composerEndRow = composerStartRow + composerLines.length;
+  const frame = lines.slice(0, height).map((line, index) => {
+    if (index >= chatStart && index < chatEnd) return line;
+    if (index >= composerStartRow && index < composerEndRow) {
+      return composerBackground(padToWidth(line, width - 1));
+    }
+    return chromeBackground(padToWidth(line, width - 1));
+  });
 
   if (input.approval) return { lines: frame, bodyHeight };
 
