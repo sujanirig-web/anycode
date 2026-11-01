@@ -134,12 +134,44 @@ export class OpenAIProvider implements Provider {
       body.temperature = request.temperature;
     }
 
-    const response = await postStream({
-      url: `${this.baseURL}/chat/completions`,
-      headers,
-      body,
-      signal: request.signal,
-    });
+    let response: Response;
+    try {
+      response = await postStream({
+        url: `${this.baseURL}/chat/completions`,
+        headers,
+        body,
+        signal: request.signal,
+      });
+    } catch (error) {
+      if (this.id === "nvidia-nim" && error instanceof ProviderError && error.status === 403) {
+        throw new ProviderError(
+          error.message,
+          error.status,
+          "NVIDIA rejected this key for chat completions. Create a new key at https://build.nvidia.com and set NVIDIA_API_KEY, or switch to AnyRoute with /connect.",
+        );
+      }
+
+      const nimFunctionLookupFailure =
+        this.id === "nvidia-nim" &&
+        tools.length > 0 &&
+        error instanceof ProviderError &&
+        error.status === 404 &&
+        /function .+ not found for account/i.test(error.message);
+      if (!nimFunctionLookupFailure) throw error;
+
+      // Some NIM deployments reject registered function references even when
+      // tools are sent using the OpenAI-compatible schema. Retry chat without
+      // tools so ordinary conversational prompts still work.
+      const chatOnlyBody = { ...body };
+      delete chatOnlyBody.tools;
+      delete chatOnlyBody.tool_choice;
+      response = await postStream({
+        url: `${this.baseURL}/chat/completions`,
+        headers,
+        body: chatOnlyBody,
+        signal: request.signal,
+      });
+    }
 
     if (!response.body) {
       throw new ProviderError("Provider returned an empty stream");

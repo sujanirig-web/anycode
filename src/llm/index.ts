@@ -52,6 +52,14 @@ export function createProvider(settings: ProviderSettings): Provider {
       });
 
     default:
+      if (settings.baseURL) {
+        return new OpenAIProvider({
+          id: settings.id,
+          label: settings.id,
+          baseURL: settings.baseURL,
+          ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+        });
+      }
       throw new UserError(
         `Unknown provider "${settings.id}". Use one of: anthropic, openai, openai-compatible, ollama, anyroute.`,
       );

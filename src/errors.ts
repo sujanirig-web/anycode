@@ -23,11 +23,13 @@ export class ToolError extends Error {
 /** Error raised by a model provider (HTTP failure, bad payload, ...). */
 export class ProviderError extends Error {
   readonly status?: number;
+  readonly hint?: string;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, hint?: string) {
     super(message);
     this.name = "ProviderError";
     this.status = status;
+    this.hint = hint;
   }
 }
 

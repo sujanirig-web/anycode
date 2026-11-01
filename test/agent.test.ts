@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 
 import { Agent, type AgentEvent } from "../src/agent/agent.js";
 import { Session } from "../src/agent/session.js";
+import { ProviderError } from "../src/errors.js";
 import { MockProvider, textTurn, toolTurn, type MockScript } from "../src/llm/mock.js";
 import type { Message } from "../src/types.js";
 import { cleanup, tempDir } from "./helpers.js";
@@ -153,6 +154,23 @@ describe("agent loop", () => {
       assert.match(failures[0]!.content, /Unknown tool/);
       assert.match(failures[1]!.content, /Invalid JSON arguments/);
       assert.equal(finalText(events).trim(), "Recovered.");
+    } finally {
+      await cleanup(root);
+    }
+  });
+
+  it("forwards provider hints to the error event", async () => {
+    const root = await tempDir();
+    try {
+      const script: MockScript = () => {
+        throw new ProviderError("HTTP 403: Authorization failed", 403, "Switch providers.");
+      };
+
+      const { events } = await run(script, { root });
+      const error = events.find(
+        (event): event is Extract<AgentEvent, { type: "error" }> => event.type === "error",
+      );
+      assert.equal(error?.hint, "Switch providers.");
     } finally {
       await cleanup(root);
     }

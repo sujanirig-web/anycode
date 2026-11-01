@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { defaultBaseURLFor, defaultModelFor, loadConfig, listProviders, resolveProviderDefaults, saveProviderPreset } from "../src/config.js";
+import { defaultBaseURLFor, defaultModelFor, deleteProjectProviderPreset, deleteProviderPreset, loadConfig, listConfiguredProviders, listProviders, resolveProviderDefaults, saveGlobalConfig, saveProviderPreset } from "../src/config.js";
 import { createProvider } from "../src/llm/index.js";
 import { OpenAIProvider } from "../src/llm/openai.js";
 
@@ -75,6 +75,10 @@ describe("config", () => {
     assert.equal(defaultModelFor("anyroute"), "anyroute");
     assert.equal(defaultBaseURLFor("anyroute"), "http://127.0.0.1:3456/v1");
     assert.equal(defaultModelFor("unknown-provider"), "");
+  });
+
+  it("lists AnyRoute first so the local gateway is immediately visible", () => {
+    assert.equal(listProviders()[0]?.id, "anyroute");
   });
 
   it("reads ANYROUTE_API_KEY without requiring one", async () => {
@@ -160,12 +164,29 @@ describe("anyroute provider", () => {
 });
 
 describe("provider presets", () => {
+  it("remembers the last selected provider and model as global defaults", async () => {
+    await withHome(async (_home, cwd) => {
+      await saveGlobalConfig({ theme: "retro" });
+      await saveGlobalConfig({ provider: "mistral", model: "mistral-large-latest" });
+
+      const config = await loadConfig(cwd);
+      assert.equal(config.provider, "mistral");
+      assert.equal(config.model, "mistral-large-latest");
+      assert.equal(config.baseURL, "https://api.mistral.ai/v1");
+    });
+  });
+
   it("lists all built-in providers", () => {
     const providers = listProviders();
     const ids = providers.map((p) => p.id);
     assert.ok(ids.includes("anthropic"));
     assert.ok(ids.includes("openai"));
     assert.ok(ids.includes("openai-compatible"));
+    assert.ok(ids.includes("nvidia-nim"));
+    assert.ok(ids.includes("mistral"));
+    assert.ok(ids.includes("google-gemini"));
+    assert.ok(ids.includes("deepseek"));
+    assert.ok(ids.includes("groq"));
     assert.ok(ids.includes("ollama"));
     assert.ok(ids.includes("anyroute"));
     for (const p of providers) {
@@ -180,6 +201,12 @@ describe("provider presets", () => {
     assert.equal(ollama?.site, "https://ollama.com");
     const anyroute = providers.find((p) => p.id === "anyroute");
     assert.equal(anyroute?.site, "https://github.com/sujanirig-web/anycode");
+    const nvidia = providers.find((p) => p.id === "nvidia-nim");
+    assert.equal(nvidia?.baseURL, "https://integrate.api.nvidia.com/v1");
+    assert.equal(nvidia?.keyEnv, "NVIDIA_API_KEY");
+    const mistral = providers.find((p) => p.id === "mistral");
+    assert.equal(mistral?.baseURL, "https://api.mistral.ai/v1");
+    assert.equal(mistral?.keyEnv, "MISTRAL_API_KEY");
   });
 
   it("resolves built-in defaults without custom presets", () => {
@@ -213,6 +240,51 @@ describe("provider presets", () => {
       assert.equal(config.model, "custom-model");
       assert.equal(config.baseURL, "http://127.0.0.1:7777/v1");
       assert.equal(config.contextTokens, 500_000);
+
+      const providers = await listConfiguredProviders(_cwd);
+      const custom = providers.find((provider) => provider.id === "my-llm");
+      assert.equal(custom?.model, "custom-model");
+      assert.equal(custom?.baseURL, "http://127.0.0.1:7777/v1");
+    });
+  });
+
+  it("deletes a custom provider preset from the global config", async () => {
+    await withHome(async (_home, cwd) => {
+      await saveProviderPreset("my-llm", { model: "custom-model" });
+
+      const result = await deleteProviderPreset("my-llm");
+      assert.equal(result.removed, true);
+
+      const providers = await listConfiguredProviders(cwd);
+      assert.ok(!providers.some((provider) => provider.id === "my-llm"));
+    });
+  });
+
+  it("deletes a custom provider preset from the project config only", async () => {
+    await withHome(async (_home, cwd) => {
+      await saveProviderPreset("my-llm", { model: "global-model" });
+      const projectFile = path.join(cwd, ".anycode", "config.json");
+      await mkdir(path.dirname(projectFile), { recursive: true });
+      await writeFile(
+        projectFile,
+        JSON.stringify({ providers: { "my-llm": { model: "project-model" } } }),
+        "utf8",
+      );
+
+      const result = await deleteProjectProviderPreset("my-llm", cwd);
+      assert.equal(result.removed, true);
+      assert.equal(result.file, projectFile);
+
+      const providers = await listConfiguredProviders(cwd);
+      const custom = providers.find((provider) => provider.id === "my-llm");
+      assert.equal(custom?.model, "global-model");
+    });
+  });
+
+  it("reports when a provider preset is not present", async () => {
+    await withHome(async (_home, _cwd) => {
+      const result = await deleteProviderPreset("missing-provider");
+      assert.equal(result.removed, false);
     });
   });
 });

@@ -7,9 +7,10 @@ import { Agent } from "./agent/agent.js";
 import { PermissionBroker } from "./agent/permissions.js";
 import { createSystemPrompt } from "./agent/prompt.js";
 import { Session, latestSession, listSessions } from "./agent/session.js";
-import { loadConfig, saveProviderPreset, listProviders, type Config, type ConfigOverrides } from "./config.js";
+import { defaultBaseURLFor, loadConfig, saveGlobalConfig, saveProviderPreset, listConfiguredProviders, type Config, type ConfigOverrides } from "./config.js";
 import { UserError, errorMessage } from "./errors.js";
 import { createProvider } from "./llm/index.js";
+import { fetchModelIds } from "./llm/models.js";
 import { color } from "./util/ansi.js";
 import { Spinner } from "./util/spinner.js";
 import { oneLine } from "./util/text.js";
@@ -49,7 +50,7 @@ Usage:
 
 Options:
   -m, --model <name>          Model to use
-  -p, --provider <id>         anthropic | openai | openai-compatible | ollama | anyroute
+  -p, --provider <id>         Built-in provider id or a saved custom provider id
       --base-url <url>        Override the provider base URL (local models, proxies)
       --api-key <key>         Override the API key (prefer environment variables)
   -s, --session <id>          Resume a specific session
@@ -172,10 +173,9 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   let session: Session | undefined;
-  if (wantsLatest) {
-    session = await latestSession(cwd);
-    if (!session) throw new UserError("No sessions found in this directory.");
-  } else if (resumeId) {
+  // Decide which session to use, in order of precedence:
+  // 1. --session/-s flag  2. --continue / resume subcommand  3. auto-open latest session if it exists  4. fresh session
+  if (resumeId) {
     try {
       session = await Session.load(cwd, resumeId);
     } catch (error) {
@@ -183,6 +183,15 @@ export async function main(argv: string[]): Promise<number> {
         `Could not load session "${resumeId}": ${errorMessage(error)}`,
         "Run `anycode sessions` to list saved sessions.",
       );
+    }
+  } else if (wantsLatest) {
+    session = await latestSession(cwd);
+    if (!session) throw new UserError("No sessions found in this directory.");
+  } else {
+    // Auto-open the most recent session, or start fresh.
+    const latest = await latestSession(cwd);
+    if (latest) {
+      session = latest;
     }
   }
 
@@ -235,17 +244,24 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const broker = new PermissionBroker(config.autoApprove);
+  const providerApiKeys = new Map<string, string>();
+  const providerBaseURLs = new Map<string, string>();
+  if (config.apiKey) providerApiKeys.set(config.provider, config.apiKey);
+  if (config.baseURL) providerBaseURLs.set(config.provider, config.baseURL);
 
   const build = async (
     forSession: Session,
     providerId: string,
     model: string,
+    overrides: { apiKey?: string; baseURL?: string } = {},
   ): Promise<{ agent: Agent; config: Config }> => {
+    const apiKey = overrides.apiKey ?? providerApiKeys.get(providerId) ?? values["api-key"];
+    const baseURL = overrides.baseURL ?? providerBaseURLs.get(providerId) ?? values["base-url"];
     const effective = await loadConfig(cwd, {
       provider: providerId,
       model,
-      ...(values["base-url"] ? { baseURL: values["base-url"] } : {}),
-      ...(values["api-key"] ? { apiKey: values["api-key"] } : {}),
+      ...(baseURL ? { baseURL } : {}),
+      ...(apiKey ? { apiKey } : {}),
       ...(maxSteps !== undefined ? { maxSteps } : {}),
       ...(maxTokens !== undefined ? { maxTokens } : {}),
       autoApprove: broker.autoApprove,
@@ -299,7 +315,23 @@ export async function main(argv: string[]): Promise<number> {
         const providerId = changes.providerId ?? runtime.providerId;
         const model = changes.model?.trim() || runtime.model;
         const nextSession = changes.session ?? runtime.session;
-        const result = await build(nextSession, providerId, model);
+        const previousApiKey = providerApiKeys.get(providerId);
+        const previousBaseURL = providerBaseURLs.get(providerId);
+        if (changes.apiKey !== undefined) providerApiKeys.set(providerId, changes.apiKey);
+        if (changes.baseURL !== undefined) providerBaseURLs.set(providerId, changes.baseURL);
+        let result: Awaited<ReturnType<typeof build>>;
+        try {
+          result = await build(nextSession, providerId, model, changes);
+          await saveGlobalConfig({ provider: result.config.provider, model: result.config.model });
+        } catch (error) {
+          if (previousApiKey === undefined) providerApiKeys.delete(providerId);
+          else providerApiKeys.set(providerId, previousApiKey);
+          if (previousBaseURL === undefined) providerBaseURLs.delete(providerId);
+          else providerBaseURLs.set(providerId, previousBaseURL);
+          throw error;
+        }
+        if (result.config.apiKey) providerApiKeys.set(providerId, result.config.apiKey);
+        if (result.config.baseURL) providerBaseURLs.set(providerId, result.config.baseURL);
         runtime.agent = result.agent;
         runtime.session = nextSession;
         runtime.providerId = result.config.provider;
@@ -313,7 +345,15 @@ export async function main(argv: string[]): Promise<number> {
       },
       listSessions: () => listSessions(cwd),
       loadSession: (id) => Session.load(cwd, id),
-      listProviders: async () => listProviders(),
+      listProviders: async () => listConfiguredProviders(cwd),
+      listModels: async (providerId) => {
+        const providers = await listConfiguredProviders(cwd);
+        const provider = providers.find((entry) => entry.id === providerId);
+        const baseURL = providerBaseURLs.get(providerId) ?? provider?.baseURL ?? defaultBaseURLFor(providerId);
+        if (!baseURL) return [];
+        const apiKey = providerApiKeys.get(providerId) ?? (provider?.keyEnv ? process.env[provider.keyEnv] : undefined);
+        return await fetchModelIds(providerId, baseURL, apiKey);
+      },
       saveProvider: async (id, preset) => {
         await saveProviderPreset(id, preset);
       },
@@ -326,6 +366,7 @@ export async function main(argv: string[]): Promise<number> {
     if (useTui) {
       const tui = new Tui(runtime);
       runtime.showModelPicker = tui.showModelPicker.bind(tui);
+      runtime.showProviderPicker = tui.showProviderPicker.bind(tui);
       await tui.run();
     } else {
       await runRepl(runtime);

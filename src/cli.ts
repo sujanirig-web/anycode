@@ -7,26 +7,26 @@
 import { UserError } from "./errors.js";
 
 if (process.argv.includes("--no-color")) {
-  process.env.NO_COLOR = "1";
+	process.env.NO_COLOR = "1";
 }
 
 const { main } = await import("./main.js");
 
 try {
-  process.exitCode = await main(process.argv.slice(2));
+	process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
-  if (error instanceof UserError) {
-    process.stderr.write(`anycode: ${error.message}\n`);
-    if (error.hint) {
-      process.stderr.write(`hint: ${error.hint}\n`);
-    }
-    process.exitCode = 1;
-  } else {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`anycode: ${message}\n`);
-    if (error instanceof Error && error.stack) {
-      process.stderr.write(`Stack trace:\n${error.stack}\n`);
-    }
-    process.exitCode = 1;
-  }
+	if (error instanceof UserError) {
+		process.stderr.write(`anycode: ${error.message}\n`);
+		if (error.hint) {
+			process.stderr.write(`hint: ${error.hint}\n`);
+		}
+		process.exitCode = 1;
+	} else {
+		const message = error instanceof Error ? error.message : String(error);
+		process.stderr.write(`anycode: ${message}\n`);
+		if (error instanceof Error && error.stack) {
+			process.stderr.write(`Stack trace:\n${error.stack}\n`);
+		}
+		process.exitCode = 1;
+	}
 }

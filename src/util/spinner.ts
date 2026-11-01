@@ -1,4 +1,9 @@
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/**
+ * Node-linking pulse used by the REPL/CLI spinner. The highlighted node walks
+ * across three connected nodes and back, so the loading state reads as a small
+ * network forming.
+ */
+export const NODE_FRAMES = ["◉─○─○", "●─◉─○", "●─●─◉", "●─◉─○"] as const;
 
 /** Small terminal spinner that is a no-op when stdout is not a TTY. */
 export class Spinner {
@@ -22,9 +27,9 @@ export class Spinner {
     if (this.timer || !this.stream.isTTY) return;
 
     this.timer = setInterval(() => {
-      const frame = FRAMES[this.frame++ % FRAMES.length]!;
+      const frame = NODE_FRAMES[this.frame++ % NODE_FRAMES.length]!;
       this.stream.write(`\r\u001b[2K\u001b[90m${frame} ${this.label}…\u001b[39m`);
-    }, 80);
+    }, 120);
     this.timer.unref?.();
   }
 

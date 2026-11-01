@@ -9,6 +9,9 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 
 import { AnthropicProvider, toAnthropicMessages } from "../src/llm/anthropic.js";
+import { ProviderError } from "../src/errors.js";
+import { createProvider } from "../src/llm/index.js";
+import { fetchModelIds } from "../src/llm/models.js";
 import { OpenAIProvider, toOpenAIMessages } from "../src/llm/openai.js";
 import type { Message, ProviderEvent, ProviderRequest } from "../src/types.js";
 
@@ -69,6 +72,132 @@ async function startServer(
       }),
   };
 }
+
+describe("custom provider presets", () => {
+  it("creates a custom provider from its configured OpenAI-compatible URL", () => {
+    const provider = createProvider({
+      id: "my-gateway",
+      model: "custom-model",
+      baseURL: "http://localhost:7777/v1",
+    });
+
+    assert.ok(provider instanceof OpenAIProvider);
+    assert.equal(provider.id, "my-gateway");
+  });
+
+  it("constructs NVIDIA NIM and Mistral through their compatible API endpoints", () => {
+    const nvidia = createProvider({
+      id: "nvidia-nim",
+      model: "meta/llama-3.1-8b-instruct",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: "nvidia-test-key",
+    });
+    const mistral = createProvider({
+      id: "mistral",
+      model: "mistral-large-latest",
+      baseURL: "https://api.mistral.ai/v1",
+      apiKey: "mistral-test-key",
+    });
+
+    assert.ok(nvidia instanceof OpenAIProvider);
+    assert.equal(nvidia.id, "nvidia-nim");
+    assert.ok(mistral instanceof OpenAIProvider);
+    assert.equal(mistral.id, "mistral");
+  });
+});
+
+describe("NVIDIA NIM function lookup fallback", () => {
+  it("retries chat without tools when NIM reports a missing function", async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    const server = await startServer((_request, response, body) => {
+      requestBodies.push(JSON.parse(body) as Record<string, unknown>);
+      if (requestBodies.length === 1) {
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          status: 404,
+          title: "Not Found",
+          detail: "Function 'test-function-id': Not found for account 'test-account'",
+        }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end([
+        'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        "data: [DONE]\n\n",
+      ].join(""));
+    });
+
+    try {
+      const provider = new OpenAIProvider({
+        id: "nvidia-nim",
+        baseURL: server.baseURL,
+        apiKey: "test-key",
+      });
+      const events = await collect(provider.stream(baseRequest()));
+      assert.equal(requestBodies.length, 2);
+      assert.ok(Array.isArray(requestBodies[0]?.tools));
+      assert.equal(requestBodies[1]?.tools, undefined);
+      assert.equal(requestBodies[1]?.tool_choice, undefined);
+      assert.equal(textOf(events), "Hello");
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe("provider model discovery", () => {
+  it("uses Bearer authentication for OpenAI-compatible provider catalogs", async () => {
+    let authorization: string | undefined;
+    const server = await startServer((request, response) => {
+      authorization = request.headers.authorization;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "model-a" }, { id: "model-b" }] }));
+    });
+    try {
+      assert.deepEqual(await fetchModelIds("mistral", server.baseURL, "mistral-secret"), ["model-a", "model-b"]);
+      assert.equal(authorization, "Bearer mistral-secret");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses Anthropic's API-key headers for its model catalog", async () => {
+    let apiKey: string | undefined;
+    let version: string | undefined;
+    const server = await startServer((request, response) => {
+      apiKey = request.headers["x-api-key"] as string | undefined;
+      version = request.headers["anthropic-version"] as string | undefined;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "claude-test" }] }));
+    });
+    try {
+      assert.deepEqual(await fetchModelIds("anthropic", server.baseURL, "anthropic-secret"), ["claude-test"]);
+      assert.equal(apiKey, "anthropic-secret");
+      assert.equal(version, "2023-06-01");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("surfaces catalog failures instead of silently reporting no models", async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(503, { "content-type": "text/plain" });
+      response.end("gateway offline");
+    });
+    try {
+      await assert.rejects(
+        fetchModelIds("anyroute", server.baseURL),
+        (error: unknown) =>
+          error instanceof ProviderError &&
+          error.status === 503 &&
+          /HTTP 503/.test(error.message),
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
 
 describe("message conversion", () => {
   it("maps neutral history to OpenAI chat messages", () => {
@@ -191,6 +320,32 @@ describe("OpenAI provider", () => {
     try {
       const provider = new OpenAIProvider({ baseURL: server.baseURL, apiKey: "nope" });
       await assert.rejects(collect(provider.stream(baseRequest())), /401.*bad key/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("turns an NVIDIA authorization failure into an actionable hint", async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(JSON.stringify({ status: 403, title: "Forbidden", detail: "Authorization failed" }));
+    });
+
+    try {
+      const provider = new OpenAIProvider({
+        id: "nvidia-nim",
+        label: "NVIDIA NIM",
+        baseURL: server.baseURL,
+        apiKey: "nope",
+      });
+      await assert.rejects(
+        collect(provider.stream(baseRequest())),
+        (error: unknown) =>
+          error instanceof ProviderError &&
+          error.status === 403 &&
+          /Authorization failed/.test(error.message) &&
+          /build\.nvidia\.com/.test(error.hint ?? ""),
+      );
     } finally {
       await server.close();
     }

@@ -47,7 +47,7 @@ anycode v0.2.0 ─────────────────────�
   always for the session, or disable prompts with `--yolo`.
 - **Sessions** — every turn is saved to `.anycode/sessions/<id>.json`. Resume
   with `--continue`, `--session <id>`, or `anycode resume`.
-- **Interactive and one-shot modes** — slash commands (`/model`, `/provider`,
+- **Interactive and one-shot modes** — slash commands (`/models`, `/connect`,
   `/resume`, `/usage`, `/yolo`, …), Ctrl+C interruption, and piping.
 - **NDJSON event stream** — `--json` emits every agent event as JSON lines for
   scripting, UIs, or tests.
@@ -136,25 +136,35 @@ To make AnyRoute the default provider, put this in `~/.anycode/config.json`:
 
 ### Providers
 
-List available providers (built-in plus any custom presets you've added):
+Choose a hosted or local provider from the TUI:
 
-```bash
+```text
 anycode
-# then inside the TUI:
-/providers
+/connect
 ```
 
-Switch to a provider:
+Connect includes Anthropic, OpenAI, NVIDIA NIM, Mistral, Gemini, DeepSeek,
+Groq, OpenRouter, Together, Fireworks, Cerebras, xAI, Cohere, SambaNova,
+Perplexity, Ollama, AnyRoute, and saved custom endpoints. The list is curated,
+not an exhaustive catalog of every AI service; use the custom provider form for
+other OpenAI-compatible APIs.
 
-```bash
-/providers anthropic
-/providers anyroute gemini/gemini-flash-latest
-```
+When connecting to AnyRoute, Connect asks for the gateway base URL so you can
+override the default `http://127.0.0.1:3456/v1` endpoint for a remote or custom
+gateway. This endpoint override is kept in memory for the current process.
 
-Add a custom provider preset (saved to `~/.anycode/config.json`):
+The API key is entered in a masked prompt and kept in memory for the current
+process. It is not written to the project or global config. Existing environment
+variables and config keys can also be used by leaving the key prompt empty.
 
-```bash
-/providers add my-llm custom-model http://127.0.0.1:7777/v1 MY_LLM_KEY
+Use the Models tab to browse the selected provider's model catalog or enter a
+model ID manually. Model catalog availability depends on the provider API.
+
+Add a custom OpenAI-compatible endpoint from Connect; its provider ID, model,
+and base URL are saved to `~/.anycode/config.json` (the API key is not):
+
+```text
+my-llm custom-model https://api.example.com/v1 MY_LLM_KEY
 ```
 
 Custom providers are merged with built-in defaults, so you can override any built-in
@@ -176,7 +186,7 @@ Options:
 | Flag | Description |
 | --- | --- |
 | `-m, --model <name>` | Model to use |
-| `-p, --provider <id>` | `anthropic`, `openai`, `openai-compatible`, `ollama`, `anyroute` |
+| `-p, --provider <id>` | Built-in provider ID or saved custom provider ID; use `/connect` to browse |
 | `--base-url <url>` | Override the provider base URL |
 | `--api-key <key>` | Override the API key (prefer environment variables) |
 | `-s, --session <id>` | Resume a specific session |
@@ -226,8 +236,12 @@ Keys:
 | `ctrl+←` / `ctrl+→` | Move by word |
 | `ctrl+k` / `ctrl+u` / `ctrl+w` | Kill to end / start / previous word |
 | `ctrl+o` | Expand or collapse tool output |
+| `alt+e` | Expand or collapse the latest activity card |
+| `ctrl+t` | Toggle verbose mode: expand or collapse every activity card |
+| `tab` while working / `ctrl+q` | Open the prompt queue; use `e` to edit or `x`/`delete` to remove a queued prompt |
 | `pageup` / `pagedown` | Scroll the transcript |
-| `ctrl+c` | Interrupt a running turn; twice at the prompt exits |
+| `ctrl+c` | Copy composer text when nonempty; with an empty composer, interrupt a turn or press twice to exit |
+| `ctrl+v` | Paste system clipboard text at the composer cursor |
 | `ctrl+d` | Quit |
 | `ctrl+l` | Repaint the screen |
 
@@ -242,8 +256,9 @@ Slash commands:
 ```
 /help              Show help
 /new               Start a new session (alias: /clear)
-/model [name]      Show or change the model
-/provider [id]     Show or change the provider (optionally with a model)
+/models            Browse models for the active provider
+/connect           Choose a provider, enter its API key, and connect
+/delete-provider <id>  Delete a saved custom provider preset
 /sessions          List saved sessions
 /resume [id]       Resume a session (default: most recent)
 /yolo              Toggle auto-approve for the rest of the session
@@ -314,11 +329,17 @@ things the agent should never touch.
 Sessions live in `<cwd>/.anycode/sessions/<id>.json` and contain the full
 message history plus token usage. They are written after every tool step.
 
+By default, running `anycode` will auto-open the most recent session if one
+exists, so you can simply resume where you left off. Use the commands below to
+control session behavior:
+
 ```bash
-anycode sessions
-anycode resume            # most recent
-anycode resume 20261028-141500-a1b2 "now add tests"
-anycode -c "keep going"
+anycode sessions          # list saved sessions
+anycode resume            # most recent session
+anycode resume <id>       # specific session
+anycode --session <id>    # resume specific session
+anycode --continue        # most recent session (explicit)
+anycode -s <id>           # resume specific session
 ```
 
 ## Library usage

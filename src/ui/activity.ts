@@ -7,6 +7,8 @@ export type StepStatus = "running" | "ok" | "warning" | "error";
 
 export interface Step {
   id: string;
+  /** Provider tool-call id, used to match a result to the right step. */
+  callId?: string;
   tool: string;
   status: StepStatus;
   summary: string;
@@ -214,6 +216,10 @@ export class ActivityTracker {
     return this.currentCardId ? this.cards.find((c) => c.id === this.currentCardId) : undefined;
   }
 
+  get lastCard(): ActivityCard | undefined {
+    return this.cards[this.cards.length - 1];
+  }
+
   get isVerbose(): boolean {
     return this.verbose;
   }
@@ -246,6 +252,7 @@ export class ActivityTracker {
     const summary = describeCall(call, input);
     const step: Step = {
       id: `step-${++this.stepCounter}`,
+      callId: call.id,
       tool: call.name,
       status: "running",
       summary,
@@ -273,11 +280,45 @@ export class ActivityTracker {
           const firstLine = content.split(/\r?\n/).find((l) => l.trim()) ?? "";
           step.error = firstLine;
         }
-        card.status = isError ? "error" : "ok";
+        this.refreshCardStatus(card);
         return step;
       }
     }
     return undefined;
+  }
+
+  /** Complete the step that belongs to a specific provider tool call. */
+  completeStepByCall(
+    callId: string,
+    content: string,
+    isError: boolean,
+    durationMs: number,
+  ): { card: ActivityCard; step: Step } | undefined {
+    for (const card of this.cards) {
+      const step = card.steps.find((candidate) => candidate.callId === callId);
+      if (step) {
+        this.completeStep(step.id, content, isError, durationMs);
+        return { card, step };
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Close the current card. Any step still running is marked as interrupted,
+   * then the card is collapsed unless verbose mode is on.
+   */
+  finishCurrentCard(): ActivityCard | undefined {
+    const card = this.currentCard;
+    if (!card) return undefined;
+    this.currentCardId = undefined;
+
+    for (const step of card.steps) {
+      if (step.status === "running") step.status = "warning";
+    }
+    this.refreshCardStatus(card);
+    if (!this.verbose) card.expanded = false;
+    return card;
   }
 
   setShellApproval(approval: ShellApproval): void {
@@ -290,7 +331,21 @@ export class ActivityTracker {
 
   clearPermission(): void {
     const card = this.currentCard;
-    if (card) card.permission = undefined;
+    if (card) {
+      card.permission = undefined;
+      this.refreshCardStatus(card);
+    }
+  }
+
+  private refreshCardStatus(card: ActivityCard): void {
+    if (card.permission) {
+      card.status = "warning";
+      return;
+    }
+    if (card.steps.some((step) => step.status === "error")) card.status = "error";
+    else if (card.steps.some((step) => step.status === "running")) card.status = "running";
+    else if (card.steps.some((step) => step.status === "warning")) card.status = "warning";
+    else card.status = "ok";
   }
 
   getRenderCards(): ActivityCard[] {

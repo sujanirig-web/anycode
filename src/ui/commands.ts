@@ -1,8 +1,7 @@
 import type { PermissionBroker } from "../agent/permissions.js";
 import { Session } from "../agent/session.js";
-import { defaultModelFor, listProviders, saveProviderPreset } from "../config.js";
+import { deleteProviderPreset, deleteProjectProviderPreset } from "../config.js";
 import { errorMessage } from "../errors.js";
-import { color } from "../util/ansi.js";
 import { builtinTools } from "../tools/index.js";
 import { formatNumber, oneLine } from "../util/text.js";
 import type { ChatRuntime, ChatState } from "./runtime.js";
@@ -24,39 +23,36 @@ export interface CommandItem {
 
 export const COMMANDS: CommandItem[] = [
   { name: "help", desc: "Show this help" },
-  { name: "new", desc: "Start a new session", args: "(alias: /clear)" },
-  { name: "clear", desc: "Start a new session", args: "(alias: /new)" },
-  { name: "model", desc: "Show or change the model", args: "[name]" },
-  { name: "models", desc: "Browse and pick a model from the provider" },
-  { name: "provider", desc: "Change the provider", args: "[id] [model]" },
-  { name: "providers", desc: "List available providers", args: "[add <id> <model> <url>]" },
+  { name: "new", desc: "Start a new session", args: "" },
+  { name: "clear", desc: "Start a new session", args: "" },
+  { name: "models", desc: "Browse models for the active provider" },
+  { name: "connect", desc: "Connect to a provider and configure its API key" },
   { name: "sessions", desc: "List saved sessions" },
-  { name: "resume", desc: "Resume a session", args: "[id]" },
+  { name: "resume", desc: "Resume a session", args: "" },
   { name: "yolo", desc: "Toggle auto-approve" },
   { name: "usage", desc: "Show token usage" },
   { name: "tools", desc: "List available tools" },
-  { name: "exit", desc: "Quit", args: "(alias: /quit)" },
-  { name: "quit", desc: "Quit", args: "(alias: /exit)" },
+  { name: "delete-provider", desc: "Delete a custom provider", args: "<id>" },
+  { name: "exit", desc: "Quit", args: "" },
+  { name: "quit", desc: "Quit", args: "" },
 ];
 
 export const SLASH_HELP = `Commands
   /help              Show this help
-  /new               Start a new session (alias: /clear)
-  /model [name]      Show or change the model
-  /models            Browse and pick a model from the provider
-  /provider [id]     Change the provider (optionally with a model)
-  /providers         List available providers
-  /providers add <id> <model> <base-url>  Add a custom provider preset
+  /new               Start a new session
+  /models            Browse models for the active provider
+  /connect           Choose a provider, enter its API key, and connect
   /sessions          List saved sessions for this directory
   /resume [id]       Resume a session (default: most recent)
   /yolo              Toggle auto-approve for the rest of the session
   /usage             Show token usage for this session
   /tools             List available tools
+  /delete-provider <id> Delete a custom provider
   /exit              Quit (alias: /quit)
 
-Keys
+ Keys
   enter send · ctrl+j newline · ctrl+o expand tool output
-  pageup/pagedown scroll · ctrl+c interrupt or clear · ctrl+d quit`;
+  pageup/pagedown scroll · end jump to latest · ctrl+c interrupt or clear · ctrl+d quit`;
 
 /**
  * Execute a slash command, mutating `state` in place. Returns true when the
@@ -98,22 +94,6 @@ export async function handleSlashCommand(
       return false;
     }
 
-    case "model": {
-      if (!argument) {
-        sink.info(`Model: ${state.model}`);
-        return false;
-      }
-      try {
-        const rebuilt = await host.rebuild({ providerId: state.providerId, model: argument });
-        Object.assign(state, rebuilt);
-        state.session.model = state.model;
-        sink.info(`Model: ${state.model}`);
-      } catch (error) {
-        sink.error(errorMessage(error));
-      }
-      return false;
-    }
-
     case "models": {
       if (typeof host.showModelPicker === "function") {
         await host.showModelPicker();
@@ -123,60 +103,12 @@ export async function handleSlashCommand(
       return false;
     }
 
-    case "provider": {
-      const [nextProvider, nextModel] = argument.split(/\s+/);
-      if (!nextProvider) {
-        sink.info(`Provider: ${state.providerId} (model: ${state.model})`);
-        return false;
+    case "connect": {
+      if (typeof host.showProviderPicker === "function") {
+        await host.showProviderPicker();
+      } else {
+        sink.error("/connect is only available in the interactive TUI.");
       }
-      try {
-        const rebuilt = await host.rebuild({
-          providerId: nextProvider,
-          model: nextModel || defaultModelFor(nextProvider) || state.model,
-        });
-        Object.assign(state, rebuilt);
-        state.session.provider = state.providerId;
-        state.session.model = state.model;
-        sink.info(`Provider: ${state.providerId}/${state.model}`);
-      } catch (error) {
-        sink.error(errorMessage(error));
-      }
-      return false;
-    }
-
-    case "providers": {
-      const sub = argument.split(/\s+/);
-      const action = sub[0] ?? "list";
-      if (action === "list" || action === "") {
-        const providers = await host.listProviders();
-        sink.info("Providers:");
-        for (const p of providers) {
-          const marker = p.id === state.providerId ? "*" : " ";
-          const base = p.baseURL ? ` · ${p.baseURL}` : "";
-          const ctx = p.contextTokens ? ` · ${formatNumber(p.contextTokens)} ctx` : "";
-          const site = p.site ? `  ${color.dim(p.site)}` : "";
-          sink.info(
-            `${marker} ${color.bold(p.id.padEnd(12))} ${color.cyan(p.model)}${base}${ctx}${site}`,
-          );
-        }
-        sink.info("Use /providers add <id> <model> <base-url> [key-env] [site] to add a custom provider.");
-        return false;
-      }
-      if (action === "add") {
-        const [id, model, baseURL, keyEnv, site] = sub.slice(1);
-        if (!id || !model || !baseURL) {
-          sink.error("Usage: /providers add <id> <model> <base-url> [key-env] [site]");
-          return false;
-        }
-        try {
-          await host.saveProvider(id, { model, baseURL, ...(keyEnv ? { keyEnv } : {}), ...(site ? { site } : {}) });
-          sink.info(`Added provider ${id} (${model})`);
-        } catch (error) {
-          sink.error(errorMessage(error));
-        }
-        return false;
-      }
-      sink.error(`Unknown providers action /providers ${action}. Use /providers or /providers add.`);
       return false;
     }
 
@@ -239,6 +171,35 @@ export async function handleSlashCommand(
     case "tools": {
       for (const tool of builtinTools) {
         sink.info(`${tool.name.padEnd(6)} ${tool.readOnly ? "(read-only)" : ""}`);
+      }
+      return false;
+    }
+
+    case "delete-provider": {
+      if (!argument) {
+        sink.error("Usage: /delete-provider <id>. Specify the provider ID to delete.");
+        return false;
+      }
+      if (argument === state.providerId) {
+        sink.error(
+          `Cannot delete the active provider '${argument}'. Switch to another provider first.`,
+        );
+        return false;
+      }
+      try {
+        const global = await deleteProviderPreset(argument);
+        const project = await deleteProjectProviderPreset(argument, host.cwd);
+        if (!global.removed && !project.removed) {
+          sink.info(`No custom provider preset named '${argument}' was found.`);
+          return false;
+        }
+        const locations = [
+          ...(global.removed ? [`global (${global.file})`] : []),
+          ...(project.removed ? [`project (${project.file})`] : []),
+        ];
+        sink.info(`Deleted provider '${argument}' from ${locations.join(" and ")}.`);
+      } catch (error) {
+        sink.error(errorMessage(error));
       }
       return false;
     }

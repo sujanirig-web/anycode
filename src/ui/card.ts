@@ -1,5 +1,5 @@
 import { color } from "../util/ansi.js";
-import { stringWidth, truncateWidth } from "../util/width.js";
+import { padToWidth, stringWidth, stripAnsi, truncateWidth } from "../util/width.js";
 import { wrapText } from "../util/wrap.js";
 import type { ActivityCard, Step, StepStatus } from "./activity.js";
 
@@ -29,14 +29,52 @@ const TREE_COLORS = {
   error: color.red,
 };
 
-const BORDER_COLOR = color.gray;
-
 const STATUS_BORDER: Record<StepStatus, (s: string) => string> = {
   running: color.gray,
   ok: color.gray,
   warning: color.yellow,
   error: color.red,
 };
+
+const MAX_DETAIL_LINES = 12;
+const MAX_PERMISSION_LINES = 6;
+
+function cardTitle(card: ActivityCard): string {
+  const marker = card.expanded ? "▾" : "▸";
+  const count = card.steps.length;
+  const failed = card.steps.filter((step) => step.status === "error").length;
+  const interrupted = card.steps.filter((step) => step.status === "warning").length;
+  const parts = [`${count} step${count === 1 ? "" : "s"}`];
+  if (failed > 0) parts.push(`${failed} failed`);
+  else if (interrupted > 0) parts.push(`${interrupted} interrupted`);
+  return `${marker} ${card.intent} · ${parts.join(" · ")}`;
+}
+
+function stepLine(
+  step: Step,
+  index: number,
+  total: number,
+  contentWidth: number,
+  selected: boolean,
+  nowMs: number | undefined,
+): string {
+  const isLast = index === total - 1;
+  const treePrefix = isLast ? "└─ " : "├─ ";
+  const glyph = step.status === "running" ? runningGlyph(nowMs) : TREE_ICONS[step.status];
+  const icon = TREE_COLORS[step.status](glyph);
+  const name = truncateWidth(step.tool, 18);
+  const timing =
+    step.durationMs !== undefined && step.status !== "running"
+      ? `  (${(step.durationMs / 1000).toFixed(1)}s)`
+      : "";
+  const plainPrefix = `${treePrefix}${glyph} `;
+  const available = contentWidth - 2 - stringWidth(plainPrefix) - stringWidth(name) - 2 - stringWidth(timing);
+  const summary = truncateWidth(step.summary, Math.max(0, available));
+  let line = `${treePrefix}${icon} ${color.gray(name)}  ${color.dim(summary)}`;
+  if (timing.length > 0) line += color.gray(timing);
+  if (selected) line = color.inverse(line);
+  return line;
+}
 
 /**
  * Render a single activity card as a bordered panel with tree steps.
@@ -53,113 +91,104 @@ export function renderCardPanel(
   // Guard: never render an empty card
   if (!card.steps || card.steps.length === 0) return [];
 
-  const innerWidth = Math.max(10, width - 4);
-  const lines: string[] = [];
-  const borderLeft = BORDER_COLOR("│");
-  const borderRight = BORDER_COLOR("│");
-
-  // Determine border color based on status
+  const totalWidth = Math.max(10, width);
+  const contentWidth = totalWidth - 2;
   const statusColor = STATUS_BORDER[card.status];
-  const borderLeftC = statusColor("│");
-  const borderRightC = statusColor("│");
+  const border = statusColor("│");
+  const body = (text: string): string => {
+    const clipped =
+      stringWidth(text) <= contentWidth
+        ? text
+        : truncateWidth(stripAnsi(text), contentWidth);
+    return `${border}${padToWidth(clipped, contentWidth)}${border}`;
+  };
 
-  // Top border: ┌─ intent ─────────
-  const title = truncateWidth(card.intent, innerWidth - 4);
-  const titlePad = Math.max(1, innerWidth - stringWidth(title) - 4);
-  lines.push(`${statusColor("┌─")} ${statusColor(title)} ${statusColor("─".repeat(titlePad))}`);
+  const lines: string[] = [];
+  const title = truncateWidth(cardTitle(card), Math.max(1, totalWidth - 6));
+  const fill = Math.max(1, totalWidth - 5 - stringWidth(title));
+  lines.push(
+    `${statusColor("┌─")} ${statusColor(title)} ${statusColor("─".repeat(fill))}${statusColor("┐")}`,
+  );
 
   if (!card.expanded) {
-    const bottom = `${statusColor("└")}${statusColor("─".repeat(innerWidth + 2))}`;
-    lines.push(bottom);
+    lines.push(`${statusColor("└")}${statusColor("─".repeat(contentWidth))}${statusColor("┘")}`);
     return lines;
   }
 
-  // Blank line
-  lines.push(`${borderLeftC}  ${borderRightC}`);
+  // Breathing room between the title and the first step.
+  lines.push(body(""));
 
-  // Steps as tree lines
-  for (let i = 0; i < card.steps.length; i++) {
-    const step = card.steps[i]!;
-    const isLast = i === card.steps.length - 1;
-    const treePrefix = isLast ? "└─ " : "├─ ";
-    const glyph = step.status === "running" ? runningGlyph(nowMs) : TREE_ICONS[step.status];
-    const icon = TREE_COLORS[step.status](glyph);
-    const name = color.gray(step.tool);
-    const detail = color.dim(step.summary);
-    const timing =
-      step.durationMs !== undefined && step.status !== "running"
-        ? `  ${color.gray(`(${step.durationMs}ms)`)}`
-        : "";
-    let stepLine = `  ${treePrefix}${icon} ${name}  ${detail}${timing}`;
-    stepLine = truncateWidth(stepLine, innerWidth - 2);
+  for (let index = 0; index < card.steps.length; index++) {
+    const step = card.steps[index]!;
+    const selected = selectedStepIndex === index;
+    lines.push(body(` ${stepLine(step, index, card.steps.length, contentWidth, selected, nowMs)}`));
 
-    if (selectedStepIndex !== undefined && i === selectedStepIndex) {
-      stepLine = color.inverse(stepLine);
-    }
-    const padding = " ".repeat(Math.max(0, innerWidth - stringWidth(stepLine)));
-    lines.push(`${borderLeftC} ${stepLine}${padding}${borderRightC}`);
-
-    // Detail line for warning/error/selected steps
-    if (
-      step.detail &&
-      (step.status === "warning" || step.status === "error" || selectedStepIndex === i)
-    ) {
-      const detailLines = wrapText(step.detail, innerWidth - 6);
-      for (const dl of detailLines) {
-        const padded = `    ${color.dim(dl)}`;
-        const dPadding = " ".repeat(Math.max(0, innerWidth - stringWidth(padded)));
-        lines.push(`${borderLeftC} ${padded}${dPadding}${borderRightC}`);
+    if (step.detail && (step.status === "warning" || step.status === "error" || selected)) {
+      const detailLines = wrapText(step.detail, Math.max(1, contentWidth - 6));
+      const shown = detailLines.slice(0, MAX_DETAIL_LINES);
+      for (const detail of shown) {
+        lines.push(body(`    ${color.dim(detail)}`));
+      }
+      if (detailLines.length > shown.length) {
+        lines.push(
+          body(`    ${color.dim(`… ${detailLines.length - shown.length} more lines`)}`),
+        );
       }
     }
   }
 
-  // Permission prompt inline inside the card
   if (card.permission) {
-    lines.push(`${borderLeftC}  ${borderRightC}`);
+    lines.push(body(""));
     lines.push(
-      `${borderLeftC}  ${statusColor("⚠")} ${color.bold(card.permission.tool)} needs approval${borderRightC}`,
+      body(`  ${statusColor("⚠")} ${color.bold(card.permission.tool)} needs approval`),
     );
-    if (card.permission.explanation) {
-      const expLines = wrapText(card.permission.explanation, innerWidth - 6);
-      for (const el of expLines) {
-        const padded = `  ${el}`;
-        const pad = " ".repeat(Math.max(0, innerWidth - stringWidth(padded)));
-        lines.push(`${borderLeftC} ${padded}${pad}${borderRightC}`);
-      }
+
+    const wrapPermission = (text: string): string[] =>
+      wrapText(text, Math.max(1, contentWidth - 4)).slice(0, MAX_PERMISSION_LINES);
+
+    for (const explanation of wrapPermission(card.permission.explanation)) {
+      lines.push(body(`  ${explanation}`));
     }
-    if (card.permission.reason) {
-      const reasonLines = wrapText(card.permission.reason, innerWidth - 6);
-      for (const rl of reasonLines) {
-        const padded = `  ${rl}`;
-        const pad = " ".repeat(Math.max(0, innerWidth - stringWidth(padded)));
-        lines.push(`${borderLeftC} ${padded}${pad}${borderRightC}`);
-      }
+    for (const reason of wrapPermission(card.permission.reason)) {
+      lines.push(body(`  ${reason}`));
     }
+
     if (card.permission.primaryCommand) {
-      const cmdLine = `  ${color.dim("Command:")} ${truncateWidth(card.permission.primaryCommand, innerWidth - 8)}`;
-      const pad = " ".repeat(Math.max(0, innerWidth - stringWidth(cmdLine)));
-      lines.push(`${borderLeftC} ${cmdLine}${pad}${borderRightC}`);
+      lines.push(
+        body(
+          `  ${color.dim("Command:")} ${truncateWidth(card.permission.primaryCommand, Math.max(1, contentWidth - 12))}`,
+        ),
+      );
     }
     if (card.permission.risk) {
       const riskColor =
-        card.permission.riskLevel === "HIGH" ? color.red : card.permission.riskLevel === "MEDIUM" ? color.yellow : color.green;
-      const riskLine = `  ${color.dim("Risk:")} ${riskColor(card.permission.riskLevel)} · ${color.dim(card.permission.risk)}`;
-      const pad = " ".repeat(Math.max(0, innerWidth - stringWidth(riskLine)));
-      lines.push(`${borderLeftC} ${riskLine}${pad}${borderRightC}`);
+        card.permission.riskLevel === "HIGH"
+          ? color.red
+          : card.permission.riskLevel === "MEDIUM"
+            ? color.yellow
+            : color.green;
+      lines.push(
+        body(
+          `  ${color.dim("Risk:")} ${riskColor(card.permission.riskLevel)} · ${color.dim(card.permission.risk)}`,
+        ),
+      );
     }
-    lines.push(`${borderLeftC}  ${borderRightC}`);
+
+    lines.push(body(""));
     lines.push(
-      `${borderLeftC}  ${color.yellow("[y]")} ${color.white("run once   ")}${color.yellow("[a]")} ${color.white("always   ")}${color.yellow("[n]")} ${color.white("cancel")}${borderRightC}`,
+      body(
+        `  ${color.yellow("[y]")} ${color.white("run once   ")}${color.yellow("[a]")} ${color.white("always   ")}${color.yellow("[n]")} ${color.white("cancel")}`,
+      ),
     );
-    lines.push(`${borderLeftC}  ${borderRightC}`);
+    lines.push(body(""));
     lines.push(
-      `${borderLeftC}  ${color.yellow("[v]")} ${color.white("full command   ")}${color.yellow("[o]")} ${color.white("output")}${borderRightC}`,
+      body(
+        `  ${color.yellow("[v]")} ${color.white("full command   ")}${color.yellow("[o]")} ${color.white("output")}`,
+      ),
     );
   }
 
-  // Bottom border
-  const bottom = `${statusColor("└")}${statusColor("─".repeat(innerWidth + 2))}`;
-  lines.push(bottom);
+  lines.push(`${statusColor("└")}${statusColor("─".repeat(contentWidth))}${statusColor("┘")}`);
 
   return lines;
 }

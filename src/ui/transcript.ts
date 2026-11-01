@@ -118,17 +118,27 @@ export class Transcript {
     this.blocks.push({ kind: "activity", text: card.intent, card });
   }
 
-  /** Replace the card in the most recent activity block (updates in place). */
+  /**
+   * Update an activity card in place, or append it if this is a new card.
+   * Matching by id keeps separate tool bursts in chronological order.
+   */
   updateCurrentActivity(card: ActivityCard): void {
     for (let i = this.blocks.length - 1; i >= 0; i--) {
       const block = this.blocks[i]!;
-      if (block.kind === "activity") {
+      if (block.kind === "activity" && block.card?.id === card.id) {
         block.card = card;
         block.cache = undefined;
         return;
       }
     }
     this.pushActivity(card);
+  }
+
+  /** Clear render caches after expanding or collapsing cards in place. */
+  invalidateActivities(): void {
+    for (const block of this.blocks) {
+      if (block.kind === "activity") block.cache = undefined;
+    }
   }
 
   appendAssistant(delta: string): void {

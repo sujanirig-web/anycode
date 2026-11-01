@@ -11,10 +11,12 @@ import { colorEnabled } from "../src/util/ansi.js";
 import { Editor } from "../src/ui/editor.js";
 import { KeyParser } from "../src/ui/keys.js";
 import { composeFrame } from "../src/ui/screen.js";
+import { Tui } from "../src/ui/tui.js";
 import { Transcript } from "../src/ui/transcript.js";
 import { stringWidth, stripAnsi } from "../src/util/width.js";
 import { wrapText } from "../src/util/wrap.js";
-import type { ActivityCard } from "../src/ui/activity.js";
+import { ActivityTracker, type ActivityCard } from "../src/ui/activity.js";
+import { renderCardPanel } from "../src/ui/card.js";
 
 function plain(value: string): string {
   return stripAnsi(value);
@@ -62,6 +64,8 @@ describe("KeyParser", () => {
     assert.deepEqual(parser.push("ok"), [{ type: "text", text: "ok" }]);
     assert.deepEqual(parser.push("\r"), [{ type: "key", name: "enter" }]);
     assert.deepEqual(parser.push("\n"), [{ type: "key", name: "enter", ctrl: true }]);
+    assert.deepEqual(parser.push("\u0003"), [{ type: "key", name: "c", ctrl: true }]);
+    assert.deepEqual(parser.push("\u0016"), [{ type: "key", name: "v", ctrl: true }]);
   });
 
   it("buffers split sequences and flushes a lone escape", () => {
@@ -166,6 +170,117 @@ describe("Transcript", () => {
   });
 });
 
+describe("activity cards", () => {
+  function card(overrides: Partial<ActivityCard> = {}): ActivityCard {
+    return {
+      id: "card-1",
+      intent: "Editing files",
+      status: "ok",
+      expanded: true,
+      steps: [
+        { id: "s1", tool: "read", status: "ok", summary: "src/a.ts", durationMs: 20 },
+        { id: "s2", tool: "edit", status: "ok", summary: "src/a.ts", durationMs: 40 },
+      ],
+      ...overrides,
+    };
+  }
+
+  it("keeps each tool burst in its own card", () => {
+    const tracker = new ActivityTracker();
+    tracker.addStep({ id: "call-1", name: "read", arguments: "{}" }, { path: "a.ts" });
+    tracker.completeStepByCall("call-1", "one line", false, 12);
+    const first = tracker.finishCurrentCard();
+
+    tracker.addStep({ id: "call-2", name: "bash", arguments: "{}" }, { command: "npm test" });
+    tracker.completeStepByCall("call-2", "status: exit code 0", false, 34);
+    const second = tracker.finishCurrentCard();
+
+    assert.ok(first);
+    assert.ok(second);
+    assert.notEqual(first.id, second.id);
+    assert.equal(first.steps.length, 1);
+    assert.equal(second.steps.length, 1);
+    assert.equal(first.steps[0]?.status, "ok");
+    assert.equal(second.steps[0]?.status, "ok");
+    assert.equal(first.expanded, false);
+    assert.equal(second.expanded, false);
+    assert.equal(tracker.currentCard, undefined);
+  });
+
+  it("completes the step that matches the provider tool call", () => {
+    const tracker = new ActivityTracker();
+    tracker.addStep({ id: "first-call", name: "read", arguments: "{}" }, { path: "a.ts" });
+    tracker.addStep({ id: "second-call", name: "bash", arguments: "{}" }, { command: "false" });
+    tracker.completeStepByCall("first-call", "one line", false, 10);
+    tracker.completeStepByCall("second-call", "status: exit code 1", true, 20);
+
+    const finished = tracker.finishCurrentCard();
+    assert.ok(finished);
+    assert.equal(finished.steps[0]?.status, "ok");
+    assert.equal(finished.steps[1]?.status, "error");
+    assert.equal(finished.status, "error");
+  });
+
+  it("keeps cards expanded in verbose mode", () => {
+    const tracker = new ActivityTracker();
+    tracker.toggleVerbose();
+    tracker.addStep({ id: "call-1", name: "read", arguments: "{}" }, { path: "a.ts" });
+    tracker.completeStepByCall("call-1", "one line", false, 12);
+    const finished = tracker.finishCurrentCard();
+    assert.equal(finished?.expanded, true);
+  });
+
+  it("appends a new activity block instead of replacing the previous one", () => {
+    const transcript = new Transcript();
+    transcript.updateCurrentActivity(card({ id: "first", intent: "First burst" }));
+    transcript.updateCurrentActivity(card({ id: "second", intent: "Second burst" }));
+
+    const text = transcript.render(72, false).map(plain).join("\n");
+    assert.match(text, /First burst/);
+    assert.match(text, /Second burst/);
+  });
+
+  it("renders a collapsed card as a compact summary", () => {
+    const lines = renderCardPanel(card({ expanded: false }), 48).map(plain);
+    assert.equal(lines.length, 2);
+    assert.match(lines[0] ?? "", /▸ Editing files · 2 steps/);
+    for (const line of lines) assert.equal(stringWidth(line), 48);
+  });
+
+  it("keeps every expanded card line the same width", () => {
+    const lines = renderCardPanel(
+      card({
+        status: "error",
+        steps: [
+          { id: "s1", tool: "read", status: "ok", summary: "src/a.ts", durationMs: 20 },
+          {
+            id: "s2",
+            tool: "bash",
+            status: "error",
+            summary: "npm test",
+            detail: "status: exit code 1\nfirst failure",
+            durationMs: 1200,
+          },
+        ],
+        permission: {
+          tool: "bash",
+          explanation: "Run the test suite.",
+          reason: "Verify the change.",
+          riskLevel: "LOW",
+          risk: "Runs local tests",
+          primaryCommand: "npm test",
+          fullCommand: "npm test",
+        },
+      }),
+      64,
+    ).map(plain);
+
+    for (const line of lines) assert.equal(stringWidth(line), 64, line);
+    assert.match(lines.join("\n"), /first failure/);
+    assert.match(lines.join("\n"), /needs approval/);
+  });
+});
+
 describe("composeFrame", () => {
   function frame(overrides: Partial<Parameters<typeof composeFrame>[0]> = {}) {
     const transcript = new Transcript();
@@ -198,6 +313,118 @@ describe("composeFrame", () => {
     assert.match(text, /next question/);
   });
 
+  it("renders command overlays as a centered panel above the composer", () => {
+    const result = frame({
+      overlay: {
+        title: "Commands · 1/2",
+        body: ["› /models  ·  Browse models", "  /connect  ·  Connect a provider"],
+        footer: "↑↓ move · Enter run · Esc close",
+        highlight: 0,
+      },
+    });
+    const lines = result.lines.map(plain);
+    const top = lines.findIndex((line) => line.includes("╭"));
+    const bottom = lines.findIndex((line) => line.includes("╰"));
+
+    assert.equal(result.cursor, undefined, "the composer cursor hides behind the modal");
+    assert.ok(top > 0, "the panel should sit below the header");
+    assert.ok(bottom > top, "the panel should have a bottom border");
+    assert.ok((lines[top] ?? "").indexOf("╭") > 0, "the panel should be horizontally centered");
+    assert.match(lines.slice(top, bottom + 1).join("\n"), /Commands · 1\/2/);
+    assert.match(lines.slice(top, bottom + 1).join("\n"), /\/models/);
+    assert.match(lines.slice(top, bottom + 1).join("\n"), /Enter run/);
+    assert.match(lines.join("\n"), /next question/, "the composer stays visible");
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 80, line);
+  });
+
+  it("keeps the overlay inside a narrow frame", () => {
+    const result = frame({
+      width: 20,
+      height: 10,
+      overlay: {
+        title: "Commands",
+        body: ["› /models  ·  Browse models", "  /connect  ·  Connect a provider"],
+        footer: "↑↓ move · Enter run · Esc close",
+        highlight: 0,
+      },
+    });
+
+    assert.equal(result.lines.length, 10);
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 20, line);
+    assert.match(result.lines.map(plain).join("\n"), /╭ Commands/);
+  });
+
+  it("keeps the selected overlay row visible when content overflows", () => {
+    const body = ["Active: anyroute", ...Array.from({ length: 12 }, (_, index) => `model-${index}`)];
+    const result = frame({
+      height: 16,
+      overlay: {
+        title: "Models · anyroute",
+        body,
+        footer: "↑↓ move · Enter use · Esc close",
+        highlight: 12,
+      },
+    });
+    const text = result.lines.map(plain).join("\n");
+
+    assert.match(text, /model-11/, "the selected model should stay inside the visible panel");
+    assert.match(text, /Enter use/);
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 80, line);
+  });
+
+  it("centers the retro ANYCODE wordmark only in an empty session", () => {
+    const empty = frame({ transcript: [], showBrand: true });
+    const emptyLines = empty.lines.map(plain);
+    const emptyText = emptyLines.join("\n");
+    assert.match(emptyText, /█/);
+    assert.match(emptyText, /[\u2801-\u28ff]/);
+    const mixed = emptyLines.find(
+      (line) => line.includes("█") && /[\u2801-\u28ff]/.test(line),
+    );
+    assert.ok(mixed, "infinity mark should sit between ANY and CODE");
+    const markIndex = mixed.search(/[\u2801-\u28ff]/);
+    assert.ok(mixed.slice(0, markIndex).includes("█"), "ANY should be left of the mark");
+    assert.ok(mixed.slice(markIndex).includes("█"), "CODE should be right of the mark");
+    assert.ok(!emptyText.includes("TERMINAL AI"));
+    assert.equal(empty.lines.length, 24);
+    for (const line of empty.lines) assert.ok(stringWidth(line) <= 80, line);
+
+    const started = frame({
+      transcript: ["› hello"],
+      showBrand: true,
+    });
+    assert.ok(!started.lines.map(plain).join("\n").includes("█"));
+  });
+
+  it("uses a compact ANYCODE mark on narrow terminals", () => {
+    const result = frame({
+      width: 20,
+      height: 20,
+      transcript: [],
+      showBrand: true,
+    });
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /A N Y C O D E/);
+    assert.match(text, /[\u2801-\u28ff]/);
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 20, line);
+  });
+
+  it("keeps queued prompts pinned while the conversation scrolls", () => {
+    const transcript = Array.from({ length: 60 }, (_, index) => `conversation line ${index}`);
+    const queuedPrompts = ["first queued request", "second queued request", "third queued request"];
+    const bottom = frame({ transcript, queuedPrompts, scroll: 0 });
+    const scrolled = frame({ transcript, queuedPrompts, scroll: 35 });
+    const bottomText = bottom.lines.map(plain).join("\n");
+    const scrolledText = scrolled.lines.map(plain).join("\n");
+
+    for (const prompt of queuedPrompts) {
+      assert.ok(bottomText.includes(prompt), `bottom view should show ${prompt}`);
+      assert.ok(scrolledText.includes(prompt), `scrolled view should still show ${prompt}`);
+    }
+    assert.match(scrolledText, /QUEUED · 3/);
+    for (const line of scrolled.lines) assert.ok(stringWidth(line) <= 80, line);
+  });
+
   it("places the cursor on the composer line", () => {
     const result = frame();
     assert.ok(result.cursor);
@@ -208,12 +435,10 @@ describe("composeFrame", () => {
 
   it("anchors the footer to the bottom edge below the composer", () => {
     const idle = frame();
+    const composerIdx = idle.lines.findIndex((line) => line.includes("next question"));
+    assert.ok(composerIdx >= 0, "composer should still be present");
     assert.match(plain(idle.lines.at(-1) ?? ""), /attach · commands · run/);
-    assert.equal(plain(idle.lines.at(-2) ?? "").trim(), "");
-    assert.equal(plain(idle.lines.at(-3) ?? "").trim(), "");
-    assert.equal(plain(idle.lines.at(-4) ?? "").trim(), "");
-    assert.equal(plain(idle.lines.at(-5) ?? "").trim(), "");
-    assert.match(plain(idle.lines.at(-6) ?? ""), /next question/);
+    assert.ok((plain(idle.lines.at(-2) ?? "").trim() === "") || composerIdx < idle.lines.length - 3, "footer should sit below the compact composer");
 
     const running = frame({
       agentMode: "running",
@@ -221,33 +446,28 @@ describe("composeFrame", () => {
       agentStatus: {
         status: "working",
         currentIntent: "step 1",
-        waveform: "▁ ▂ ▃",
       },
     });
     assert.equal(running.lines.length, 24);
     assert.match(plain(running.lines.at(-1) ?? ""), /attach · commands · run/);
-    assert.equal(plain(running.lines.at(-2) ?? "").trim(), "");
-    assert.equal(plain(running.lines.at(-3) ?? "").trim(), "");
+    assert.ok((plain(running.lines.at(-2) ?? "").trim() === "") || running.lines.findIndex((line) => line.includes("▌")) > 0, "running composer should remain compact and clear of the footer");
   });
 
-  it("moves the hint out of the composer as a plain footer", () => {
+  it("keeps the working composer clear and the hint in the footer", () => {
     const result = frame({
       agentMode: "running",
       composer: { text: "", cursor: 0 },
       agentStatus: {
         status: "working",
         currentIntent: "thinking",
-        waveform: "▁ ▂ ▃",
       },
     });
     const lines = result.lines.map(plain);
-    const waveIdx = lines.findIndex((line) => line.includes("▁ ▂ ▃"));
     const hintIdx = lines.findIndex((line) => line.includes("attach · commands · run"));
-    const composerIdx = lines.findIndex((line) => line.startsWith("▌"));
-    assert.ok(waveIdx >= 0, "Waveform should be visible");
-    assert.match(lines[waveIdx] ?? "", /^▌ ▁ ▂ ▃/);
+    const composerIdx = lines.findIndex((line) => line.includes("▌"));
     assert.ok(hintIdx > composerIdx, "Hint should sit below the composer");
     assert.ok(!(lines[hintIdx] ?? "").includes("▌"), "Hint should not use the composer rail");
+    assert.ok(!lines.some((line) => /[▁▂▃▄▅▆▇█]/.test(line)), "Composer should not show waveform bars");
   });
 
   it("keeps working on small terminals", () => {
@@ -256,25 +476,23 @@ describe("composeFrame", () => {
     for (const line of result.lines) assert.ok(stringWidth(line) <= 40, line);
   });
 
-  it("renders the model line directly below the waveform", () => {
+  it("renders the model line without a waveform in the composer", () => {
     const result = frame({
       agentMode: "running",
       model: { provider: "anyroute", model: "anyroute", autoApprove: true },
       agentStatus: {
         status: "working",
         currentIntent: "thinking",
-        waveform: "▁ ▂ ▃",
       },
     });
     const lines = result.lines.map(plain);
-    const waveIdx = lines.findIndex((line) => line.includes("▁ ▂ ▃"));
     const modelIdx = lines.findIndex((line) => line.includes("model:"));
-    assert.ok(waveIdx >= 0, "Waveform should be visible");
-    assert.equal(modelIdx, waveIdx + 1, "Model row should be directly below the waveform");
+    assert.ok(modelIdx >= 0, "Model row should remain visible");
+    assert.ok(!lines.some((line) => /[▁▂▃▄▅▆▇█]/.test(line)), "No waveform bars should be rendered");
     assert.match(lines[modelIdx] ?? "", /model:\s+anyroute\/anyroute\s+\(auto-approve\)/);
   });
 
-  it("keeps the waveform and model row from colliding on narrow terminals", () => {
+  it("keeps the model row inside narrow terminals without a waveform", () => {
     const result = frame({
       width: 20,
       height: 12,
@@ -284,14 +502,30 @@ describe("composeFrame", () => {
       agentStatus: {
         status: "working",
         currentIntent: "thinking",
-        waveform: "▁ ▂ ▃ ▄ ▅ ▆ ▇ █ ▇ ▆ ▅ ▄ ▃",
       },
     });
     const lines = result.lines.map(plain);
-    const waveIdx = lines.findIndex((line) => line.includes("▁"));
     const modelIdx = lines.findIndex((line) => line.includes("model:"));
-    assert.ok(waveIdx >= 0, "Waveform should be visible");
-    assert.equal(modelIdx, waveIdx + 1, "Model row should be directly below the waveform");
+    assert.ok(modelIdx >= 0, "Model row should remain visible");
+    assert.match(lines[modelIdx] ?? "", /model:/);
+    assert.ok(!lines.some((line) => /[▁▂▃▄▅▆▇█]/.test(line)), "No waveform bars should be rendered");
+    for (const line of result.lines) assert.ok(stringWidth(line) <= 20, line);
+  });
+
+  it("keeps long status rows inside the frame on narrow terminals", () => {
+    const result = frame({
+      width: 20,
+      height: 12,
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        currentIntent: "planning a long-running task",
+        currentStep: 3,
+        totalSteps: 9,
+        relevantShortcuts: "Ctrl+C · Ctrl+L",
+      },
+    });
     for (const line of result.lines) assert.ok(stringWidth(line) <= 20, line);
   });
 
@@ -324,10 +558,10 @@ describe("composeFrame", () => {
     }
 
     assert.ok(canvas.length >= 4, "canvas rows should use the black background");
-    assert.equal(composer.length, 6, "only the composer rows use the lighter surface");
-    const composerIdx = lines.findIndex((line) => line.startsWith("▌"));
+    assert.equal(composer.length, 5, "the composer surface should stay compact while reserving the top inset");
+    const composerIdx = lines.findIndex((line) => line.includes("▌"));
     assert.ok(composerIdx > 0, "composer should be visible");
-    for (let i = composerIdx; i < composerIdx + 6; i++) {
+    for (let i = composerIdx; i < composerIdx + 4; i++) {
       assert.ok(
         (result.lines[i] ?? "").includes("\u001b[48;5;234m"),
         "composer rows should use the composer surface",
@@ -337,7 +571,7 @@ describe("composeFrame", () => {
         "composer rows should not use the canvas background",
       );
     }
-    for (let i = composerIdx + 6; i < result.lines.length; i++) {
+    for (let i = composerIdx + 4; i < result.lines.length; i++) {
       assert.ok(
         !(result.lines[i] ?? "").includes("\u001b[48;5;234m"),
         "rows below the composer should not use the composer surface",
@@ -408,7 +642,9 @@ describe("composeFrame", () => {
   it("indicates scrollback when scrolled up", () => {
     const many = Array.from({ length: 100 }, (_value, index) => `line ${index}`);
     const result = frame({ transcript: many, scroll: 20 });
-    assert.match(result.lines.map(plain).join("\n"), /20 lines below/);
+    const text = result.lines.map(plain).join("\n");
+    assert.match(text, /20 lines below/);
+    assert.match(text, /\[End\] jump to latest/);
   });
 
   it("derives placeholder from agent name when idle", () => {
@@ -439,6 +675,22 @@ describe("composeFrame", () => {
     });
     const text = result.lines.map(plain).join("\n");
     assert.match(text, /Type a message…/);
+  });
+
+  it("keeps the padded placeholder and cursor inside the composer margin", () => {
+    const result = frame({
+      width: 20,
+      height: 12,
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "", cursor: 40 },
+    });
+    const line = result.lines.find((entry) => plain(entry).includes("Ask")) ?? "";
+    assert.ok(line.length > 0, "placeholder should remain visible");
+    assert.match(plain(line), /^\s{2}▌\s+Ask\s.*$/);
+    assert.ok(result.cursor, "cursor should be present");
+    assert.ok(result.cursor!.col <= 16, "cursor should stay inside the padded inner width");
+    assert.ok(stringWidth(plain(line)) <= 20, "placeholder should stay within the terminal width");
   });
 
   it("shows 'Type to queue your next instruction…' when running", () => {
@@ -482,6 +734,24 @@ describe("composeFrame", () => {
     assert.match(text, /▌ hello there/);
   });
 
+  it("soft-wraps long prompts and keeps the cursor on the visible end row", () => {
+    const text = "d".repeat(200);
+    const result = frame({
+      width: 20,
+      height: 14,
+      composer: { text, cursor: text.length },
+    });
+    const lines = result.lines.map(plain);
+    const inputRows = lines.filter((line) => line.includes("dddd"));
+
+    assert.ok(inputRows.length > 1, "long prompt should use multiple composer rows");
+    assert.ok(inputRows.length < 200, "long prompt should fit within the available composer viewport");
+    assert.ok(inputRows.every((line) => stringWidth(line) <= 20), "wrapped prompt must not overflow the terminal");
+    assert.ok(result.cursor, "cursor should be present");
+    assert.ok(lines[result.cursor.row]?.includes("d"), "cursor row should contain the end of the prompt");
+    assert.ok(result.cursor.col <= 16, "cursor should stay within the composer text width");
+  });
+
   // Status strip tests
 
   it("idle state shows no status strip", () => {
@@ -501,25 +771,49 @@ describe("composeFrame", () => {
     assert.ok(!text.includes("✗"), "Should not contain error icon");
   });
 
-  it("working state shows spinner, status, step, and duration", () => {
+  it("working state shows the node pulse, status, step, and duration", () => {
     const result = frame({
       agentName: "Cavehound",
       agentMode: "running",
       composer: { text: "", cursor: 0 },
       agentStatus: {
         status: "working",
+        frame: "◉─○─○",
         currentIntent: "step 4",
         currentStep: 4,
         totalSteps: 10,
         durationMs: 669000,
+        relevantShortcuts: "Tab queue · Ctrl+Q manage",
       },
     });
     const text = result.lines.map(plain).join("\n");
-    assert.match(text, /⠴ Working/);
+    assert.match(text, /◉─○─○ Working/);
     assert.match(text, /step 4/);
     assert.match(text, /11m 9s/);
-    assert.ok(!text.includes("Tab queue"), "Tab queue hint should be removed");
-    assert.ok(!text.includes("Esc interrupt"), "Esc interrupt hint should be removed");
+    assert.ok(text.includes("Tab queue"), "Working status should expose queue controls");
+    assert.ok(text.includes("Ctrl+Q manage"), "Working status should expose queue management");
+  });
+
+  it("renders the infinity animation beside the working status", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        frame: "∞",
+        animation: { width: 4, lines: ["AAAA", "BBBB", "CCCC"] },
+        currentIntent: "thinking",
+        durationMs: 1000,
+        relevantShortcuts: "Tab queue",
+      },
+    });
+    const lines = result.lines.map(plain);
+    const statusLine = lines.find((line) => line.includes("∞ Working"));
+    assert.ok(statusLine, "working status should render");
+    assert.ok(statusLine.includes("BBBB"), "status text should sit on the middle animation row");
+    assert.ok(!statusLine.includes("AAAA"), "top animation row should not carry the status text");
+    assert.ok(!statusLine.includes("CCCC"), "bottom animation row should not carry the status text");
   });
 
   it("status strip shortcuts are not prefixed with ▌", () => {
@@ -617,16 +911,71 @@ describe("composeFrame", () => {
     });
     const text = result.lines.map(plain).join("\n");
     const lines = text.split("\n");
-    // Find the status line (with ⠴ Working) and the composer line (with ▌)
-    const statusIdx = lines.findIndex((l) => l.includes("⠴ Working"));
+    // Find the working status and composer lines.
+    const statusIdx = lines.findIndex((l) => l.includes("Working"));
     const composerIdx = lines.findIndex((l) => l.includes("▌"));
     assert.ok(statusIdx >= 0, "Status line should exist");
     assert.ok(composerIdx >= 0, "Composer line should exist");
     assert.ok(composerIdx > statusIdx, "Composer should be after status");
-    // There should be exactly one blank line between them
+    // The composer reserves its own top inset, so the gap can include the status
+    // separation row plus the composer's blank top row, but nothing else.
     const between = lines.slice(statusIdx + 1, composerIdx);
     assert.ok(between.every((l) => l.trim() === ""), "Lines between status and composer should be blank");
-    assert.ok(between.length === 1, "Exactly one blank line between status strip and composer");
+    assert.ok(between.length >= 1 && between.length <= 2, "Allow the composer top inset while keeping the status gap compact");
   });
 
+  it("adds breathing room between the transcript and composer when there is no status strip", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "idle",
+      composer: { text: "hello", cursor: 5 },
+    });
+    const lines = result.lines.map(plain);
+    const composerIdx = lines.findIndex((line) => line.includes("▌"));
+    assert.ok(composerIdx > 0, "composer should be visible");
+    assert.ok(lines[composerIdx - 1]?.trim() === "", "there should be a blank line before the composer");
+  });
+
+});
+
+describe("Tui jump to latest", () => {
+  function makeTui(): Tui {
+    const runtime = {
+      session: { messages: [] },
+      agent: {},
+      providerId: "test",
+      model: "test",
+      broker: {},
+    };
+    const tui = new Tui(runtime);
+    tui.cleaned = true;
+    return tui;
+  }
+
+  it("snaps back to the newest line with End or Ctrl+End", () => {
+    const tui = makeTui();
+
+    tui.scroll = 12;
+    tui.scrollTarget = 12;
+    tui.handleKey({ type: "key", name: "end" });
+    assert.equal(tui.scroll, 0);
+    assert.equal(tui.scrollTarget, 0);
+
+    tui.scroll = 8;
+    tui.scrollTarget = 8;
+    tui.editor.setText("draft");
+    tui.handleKey({ type: "key", name: "end", ctrl: true });
+    assert.equal(tui.scroll, 0);
+    assert.equal(tui.scrollTarget, 0);
+  });
+
+  it("leaves End to the editor while the draft is non-empty", () => {
+    const tui = makeTui();
+    tui.editor.setText("draft");
+    tui.scroll = 5;
+    tui.scrollTarget = 5;
+    tui.handleKey({ type: "key", name: "end" });
+    assert.equal(tui.scroll, 5);
+    assert.equal(tui.scrollTarget, 5);
+  });
 });

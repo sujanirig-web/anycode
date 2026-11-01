@@ -11,10 +11,17 @@ export interface StreamRequest {
 
 function errorDetail(text: string): string {
   try {
-    const parsed = JSON.parse(text) as { error?: { message?: string } | string; message?: string };
+    const parsed = JSON.parse(text) as {
+      error?: { message?: string } | string;
+      message?: string;
+      detail?: string;
+      title?: string;
+    };
     if (typeof parsed.error === "string") return parsed.error;
     if (parsed.error?.message) return parsed.error.message;
+    if (parsed.detail) return parsed.detail;
     if (parsed.message) return parsed.message;
+    if (parsed.title) return parsed.title;
   } catch {
     // fall through to raw text
   }
@@ -61,6 +68,7 @@ export async function postStream(request: StreamRequest): Promise<Response> {
         lastError = new ProviderError(
           `HTTP ${response.status}: ${errorDetail(text)}`,
           response.status,
+          hintFor(response.status),
         );
         await sleep(500 * 2 ** attempt + Math.random() * 250, request.signal);
         continue;
@@ -69,6 +77,7 @@ export async function postStream(request: StreamRequest): Promise<Response> {
       throw new ProviderError(
         `HTTP ${response.status}: ${errorDetail(text) || response.statusText}`,
         response.status,
+        hintFor(response.status),
       );
     } catch (error) {
       if (error instanceof ProviderError) throw error;

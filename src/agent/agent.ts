@@ -1,4 +1,4 @@
-import { ToolError, errorMessage, isAbortError } from "../errors.js";
+import { ProviderError, ToolError, errorMessage, isAbortError } from "../errors.js";
 import { builtinTools, findTool } from "../tools/index.js";
 import type { PermissionRequest, Tool } from "../tools/types.js";
 import type { Provider, ToolCall, Usage } from "../types.js";
@@ -165,11 +165,15 @@ export class Agent {
             aborted = true;
             break;
           }
+          const hint =
+            error instanceof ToolError || error instanceof ProviderError
+              ? error.hint
+              : undefined;
           yield {
             type: "error",
             message: errorMessage(error),
             recoverable: false,
-            ...(error instanceof ToolError && error.hint ? { hint: error.hint } : {}),
+            ...(hint ? { hint } : {}),
           };
           break;
         }

@@ -15,11 +15,24 @@ export interface Config {
 }
 
 export const PROVIDER_IDS = [
+  "anyroute",
   "anthropic",
   "openai",
   "openai-compatible",
+  "nvidia-nim",
+  "mistral",
+  "google-gemini",
+  "deepseek",
+  "groq",
+  "openrouter",
+  "together",
+  "fireworks",
+  "cerebras",
+  "xai",
+  "cohere",
+  "sambanova",
+  "perplexity",
   "ollama",
-  "anyroute",
 ] as const;
 
 export function homeDir(): string {
@@ -65,7 +78,90 @@ const PROVIDER_DEFAULTS: Record<string, ProviderDefaults> = {
   anthropic: { model: "claude-sonnet-4-5", keyEnv: "ANTHROPIC_API_KEY", site: "https://www.anthropic.com" },
   openai: { model: "gpt-4.1", keyEnv: "OPENAI_API_KEY", site: "https://openai.com" },
   "openai-compatible": { model: "", keyEnv: "OPENAI_API_KEY", site: "https://platform.openai.com" },
-  ollama: { model: "qwen2.5-coder", keyEnv: undefined, baseURL: "http://localhost:11434/v1", site: "https://ollama.com" },
+  "nvidia-nim": {
+    model: "meta/llama-3.1-8b-instruct",
+    keyEnv: "NVIDIA_API_KEY",
+    baseURL: "https://integrate.api.nvidia.com/v1",
+    site: "https://build.nvidia.com",
+  },
+  mistral: {
+    model: "mistral-large-latest",
+    keyEnv: "MISTRAL_API_KEY",
+    baseURL: "https://api.mistral.ai/v1",
+    site: "https://mistral.ai",
+  },
+  "google-gemini": {
+    model: "gemini-2.5-flash",
+    keyEnv: "GEMINI_API_KEY",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+    site: "https://ai.google.dev",
+  },
+  deepseek: {
+    model: "deepseek-chat",
+    keyEnv: "DEEPSEEK_API_KEY",
+    baseURL: "https://api.deepseek.com/v1",
+    site: "https://www.deepseek.com",
+  },
+  groq: {
+    model: "llama-3.3-70b-versatile",
+    keyEnv: "GROQ_API_KEY",
+    baseURL: "https://api.groq.com/openai/v1",
+    site: "https://groq.com",
+  },
+  openrouter: {
+    model: "openai/gpt-4.1-mini",
+    keyEnv: "OPENROUTER_API_KEY",
+    baseURL: "https://openrouter.ai/api/v1",
+    site: "https://openrouter.ai",
+  },
+  together: {
+    model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    keyEnv: "TOGETHER_API_KEY",
+    baseURL: "https://api.together.xyz/v1",
+    site: "https://www.together.ai",
+  },
+  fireworks: {
+    model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
+    keyEnv: "FIREWORKS_API_KEY",
+    baseURL: "https://api.fireworks.ai/inference/v1",
+    site: "https://fireworks.ai",
+  },
+  cerebras: {
+    model: "llama-3.3-70b",
+    keyEnv: "CEREBRAS_API_KEY",
+    baseURL: "https://api.cerebras.ai/v1",
+    site: "https://cerebras.ai",
+  },
+  xai: {
+    model: "grok-3-mini",
+    keyEnv: "XAI_API_KEY",
+    baseURL: "https://api.x.ai/v1",
+    site: "https://x.ai",
+  },
+  cohere: {
+    model: "command-a-03-2025",
+    keyEnv: "COHERE_API_KEY",
+    baseURL: "https://api.cohere.com/compatibility/v1",
+    site: "https://cohere.com",
+  },
+  sambanova: {
+    model: "Meta-Llama-3.3-70B-Instruct",
+    keyEnv: "SAMBANOVA_API_KEY",
+    baseURL: "https://api.sambanova.ai/v1",
+    site: "https://sambanova.ai",
+  },
+  perplexity: {
+    model: "sonar-pro",
+    keyEnv: "PERPLEXITY_API_KEY",
+    baseURL: "https://api.perplexity.ai",
+    site: "https://perplexity.ai",
+  },
+  ollama: {
+    model: "qwen2.5-coder",
+    keyEnv: undefined,
+    baseURL: "http://localhost:11434/v1",
+    site: "https://ollama.com",
+  },
   anyroute: {
     model: "anyroute",
     keyEnv: "ANYROUTE_API_KEY",
@@ -106,6 +202,33 @@ export function resolveProviderDefaults(
     ...(typeof customGlobal === "object" && customGlobal !== null ? customGlobal : {}),
     ...(typeof customProject === "object" && customProject !== null ? customProject : {}),
   } as ProviderDefaults;
+}
+
+export async function listConfiguredProviders(cwd: string): Promise<ProviderInfo[]> {
+  const paths = configPaths(cwd);
+  const [global, project] = await Promise.all([
+    readJsonFile(paths.global),
+    readJsonFile(paths.project),
+  ]);
+  const globalProviders = global?.providers as Record<string, unknown> | undefined;
+  const projectProviders = project?.providers as Record<string, unknown> | undefined;
+  const ids = [...new Set([
+    ...PROVIDER_IDS,
+    ...Object.keys(globalProviders ?? {}),
+    ...Object.keys(projectProviders ?? {}),
+  ])];
+
+  return ids.map((id) => {
+    const defaults = resolveProviderDefaults(id, global, project);
+    return {
+      id,
+      model: defaults.model ?? "",
+      ...((defaults.baseURL ?? defaultBaseURLFor(id)) ? { baseURL: defaults.baseURL ?? defaultBaseURLFor(id) } : {}),
+      ...(defaults.keyEnv ? { keyEnv: defaults.keyEnv } : {}),
+      ...(defaults.contextTokens ? { contextTokens: defaults.contextTokens } : {}),
+      ...(defaults.site ? { site: defaults.site } : {}),
+    };
+  });
 }
 
 async function readJsonFile(file: string): Promise<Record<string, unknown> | undefined> {
@@ -286,4 +409,38 @@ export async function saveProviderPreset(id: string, preset: {
     "utf8",
   );
   return file;
+}
+
+export interface ProviderPresetDeletion {
+  file: string;
+  removed: boolean;
+}
+
+async function removeProviderPreset(file: string, id: string): Promise<ProviderPresetDeletion> {
+  const existing = await readJsonFile(file);
+  if (!existing) return { file, removed: false };
+
+  const providers = { ...(existing.providers as Record<string, unknown> ?? {}) };
+  if (!(id in providers)) return { file, removed: false };
+
+  delete providers[id];
+  if (Object.keys(providers).length === 0) delete existing.providers;
+  else existing.providers = providers;
+
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  return { file, removed: true };
+}
+
+/** Delete a custom provider preset from the global config. */
+export async function deleteProviderPreset(id: string): Promise<ProviderPresetDeletion> {
+  return removeProviderPreset(path.join(homeDir(), ".anycode", "config.json"), id);
+}
+
+/** Delete a custom provider preset from the project config. */
+export async function deleteProjectProviderPreset(
+  id: string,
+  cwd: string,
+): Promise<ProviderPresetDeletion> {
+  return removeProviderPreset(path.join(cwd, ".anycode", "config.json"), id);
 }
