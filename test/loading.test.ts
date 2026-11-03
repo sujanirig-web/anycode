@@ -8,9 +8,11 @@ import { describe, it } from "node:test";
 
 import {
   INFINITY_COLOR_CYCLE_MS,
+  INFINITY_WIDTH,
   nodeColorAt,
   renderInfinityAnimation,
   renderInfinityFrame,
+  renderInfinityMark,
 } from "../src/ui/infinity.js";
 import { stripAnsi } from "../src/util/ansi.js";
 import { stringWidth } from "../src/util/width.js";
@@ -32,11 +34,16 @@ describe("infinity loading animation", () => {
     assert.ok(frames.size > 3, "node should occupy several positions");
   });
 
-  it("exposes the raw animation block at a fixed width", () => {
+  it("exposes a compact animation block next to the wider brand mark", () => {
     const animation = renderInfinityAnimation(650);
     assert.equal(animation.lines.length, 3);
-    assert.equal(animation.width, 15);
+    assert.equal(animation.width, 10);
     for (const line of animation.lines) assert.equal(stringWidth(line), animation.width);
+
+    const mark = renderInfinityMark();
+    assert.equal(mark.length, 3);
+    assert.equal(INFINITY_WIDTH, 15);
+    for (const line of mark) assert.equal(stringWidth(line), INFINITY_WIDTH);
   });
 
   it("shifts the node color slowly from purple to red and back", () => {

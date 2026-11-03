@@ -1,14 +1,15 @@
 import { color, rgb } from "../util/ansi.js";
 
 /**
- * Braille infinity loop with a node tracing the path. The grid is deliberately
- * small (15x3 cells) so it can sit beside the "Working" label without stealing
- * the conversation, while the braille sub-dots keep the curve smooth.
+ * Braille infinity loops with a node tracing the path. Two grids share the same
+ * curve: a compact 10x3 loader that leaves room for the status text beside it,
+ * and the wider 15x3 brand mark that balances the ANYCODE wordmark. Both keep
+ * the same height so the lobes and the crossing stay readable.
  */
-const GRID_WIDTH = 15;
-const GRID_HEIGHT = 3;
-const DOT_WIDTH = GRID_WIDTH * 2;
-const DOT_HEIGHT = GRID_HEIGHT * 4;
+const LOADER_WIDTH = 10;
+const LOADER_HEIGHT = 3;
+const BRAND_WIDTH = 15;
+const BRAND_HEIGHT = 3;
 const PATH_SAMPLES = 720;
 const PERIOD_MS = 2600;
 const TRAIL_LENGTH = 3;
@@ -39,26 +40,33 @@ interface DotPoint {
   y: number;
 }
 
+/** A braille path plus the node mapping for one grid size. */
+interface InfinityGrid {
+  width: number;
+  height: number;
+  cells: readonly (readonly number[])[];
+  /** Cell occupied by the node at curve parameter `t`. */
+  cellFor(t: number): { row: number; column: number };
+}
+
 /** Point on a horizontal Bernoulli lemniscate, mapped into dot space. */
-function lemniscate(t: number): DotPoint {
+function lemniscate(t: number, dotWidth: number, dotHeight: number): DotPoint {
   const denominator = 1 + Math.sin(t) ** 2;
   const x = Math.cos(t) / denominator;
   const y = (Math.sin(t) * Math.cos(t)) / denominator;
   return {
-    x: ((x + 1) / 2) * (DOT_WIDTH - 1),
-    y: ((0.45 - y) / 0.9) * (DOT_HEIGHT - 1),
+    x: ((x + 1) / 2) * (dotWidth - 1),
+    y: ((0.45 - y) / 0.9) * (dotHeight - 1),
   };
 }
 
-/** Precomputed braille path so each frame only has to move the node. */
-const PATH_CELLS: readonly (readonly number[])[] = buildPath();
-
-function buildPath(): number[][] {
-  const cells = Array.from({ length: GRID_HEIGHT }, () =>
-    Array<number>(GRID_WIDTH).fill(0),
-  );
+/** Precompute the braille path once per grid so each frame only moves the node. */
+function createGrid(width: number, height: number): InfinityGrid {
+  const dotWidth = width * 2;
+  const dotHeight = height * 4;
+  const cells = Array.from({ length: height }, () => Array<number>(width).fill(0));
   for (let sample = 0; sample < PATH_SAMPLES; sample++) {
-    const point = lemniscate((sample / PATH_SAMPLES) * Math.PI * 2);
+    const point = lemniscate((sample / PATH_SAMPLES) * Math.PI * 2, dotWidth, dotHeight);
     const dotX = Math.round(point.x);
     const dotY = Math.round(point.y);
     const cellX = Math.floor(dotX / 2);
@@ -67,16 +75,22 @@ function buildPath(): number[][] {
     if (!row || row[cellX] === undefined) continue;
     row[cellX]! |= DOT_BITS[dotX % 2]![dotY % 4] ?? 0;
   }
-  return cells;
-}
-
-function cellFor(t: number): { row: number; column: number } {
-  const point = lemniscate(t);
   return {
-    row: Math.min(GRID_HEIGHT - 1, Math.max(0, Math.floor(Math.round(point.y) / 4))),
-    column: Math.min(GRID_WIDTH - 1, Math.max(0, Math.floor(Math.round(point.x) / 2))),
+    width,
+    height,
+    cells,
+    cellFor(t: number) {
+      const point = lemniscate(t, dotWidth, dotHeight);
+      return {
+        row: Math.min(height - 1, Math.max(0, Math.floor(Math.round(point.y) / 4))),
+        column: Math.min(width - 1, Math.max(0, Math.floor(Math.round(point.x) / 2))),
+      };
+    },
   };
 }
+
+const LOADER_GRID = createGrid(LOADER_WIDTH, LOADER_HEIGHT);
+const BRAND_GRID = createGrid(BRAND_WIDTH, BRAND_HEIGHT);
 
 function mixColor(from: RgbColor, to: RgbColor, amount: number): RgbColor {
   return {
@@ -105,15 +119,15 @@ function trailColorAt(elapsedMs: number, index: number): RgbColor {
 /** Render the infinity path with a node tracing it. */
 export function renderInfinityFrame(elapsedMs: number): string[] {
   const phase = ((elapsedMs % PERIOD_MS) / PERIOD_MS) * Math.PI * 2;
-  const node = cellFor(phase);
+  const node = LOADER_GRID.cellFor(phase);
   const nodeColor = nodeColorAt(elapsedMs);
   const trail = new Map<string, number>();
   for (let index = 1; index <= TRAIL_LENGTH; index++) {
-    const point = cellFor(phase - index * TRAIL_STEP);
+    const point = LOADER_GRID.cellFor(phase - index * TRAIL_STEP);
     trail.set(`${point.row}:${point.column}`, index);
   }
 
-  return PATH_CELLS.map((rowCells, row) =>
+  return LOADER_GRID.cells.map((rowCells, row) =>
     rowCells
       .map((bits, column) => {
         if (row === node.row && column === node.column) {
@@ -130,16 +144,16 @@ export function renderInfinityFrame(elapsedMs: number): string[] {
   );
 }
 
-/** Visible width of the infinity block in terminal columns. */
-export const INFINITY_WIDTH = GRID_WIDTH;
+/** Visible width of the brand mark in terminal columns. */
+export const INFINITY_WIDTH = BRAND_GRID.width;
 
 /**
- * Static infinity mark for the empty-session brand. It uses the same braille
- * path as the loader but leaves out the node and trail so it reads as a logo
- * rather than a progress indicator.
+ * Static infinity mark for the empty-session brand. It uses the wider brand
+ * path but leaves out the node and trail so it reads as a logo rather than a
+ * progress indicator.
  */
 export function renderInfinityMark(): string[] {
-  return PATH_CELLS.map((rowCells) =>
+  return BRAND_GRID.cells.map((rowCells) =>
     color.bold(
       color.magenta(
         rowCells
@@ -160,5 +174,5 @@ export interface InfinityAnimation {
  * goes; the lines are not padded to the terminal width.
  */
 export function renderInfinityAnimation(elapsedMs: number): InfinityAnimation {
-  return { width: GRID_WIDTH, lines: renderInfinityFrame(elapsedMs) };
+  return { width: LOADER_GRID.width, lines: renderInfinityFrame(elapsedMs) };
 }
