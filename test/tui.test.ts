@@ -794,7 +794,7 @@ describe("composeFrame", () => {
     assert.ok(text.includes("Ctrl+Q manage"), "Working status should expose queue management");
   });
 
-  it("renders the infinity animation beside the working status", () => {
+  it("keeps the working status on one row with the infinity glyph", () => {
     const result = frame({
       agentName: "Cavehound",
       agentMode: "running",
@@ -802,7 +802,6 @@ describe("composeFrame", () => {
       agentStatus: {
         status: "working",
         frame: "∞",
-        animation: { width: 4, lines: ["AAAA", "BBBB", "CCCC"] },
         currentIntent: "thinking",
         durationMs: 1000,
         relevantShortcuts: "Tab queue",
@@ -811,9 +810,8 @@ describe("composeFrame", () => {
     const lines = result.lines.map(plain);
     const statusLine = lines.find((line) => line.includes("∞ Working"));
     assert.ok(statusLine, "working status should render");
-    assert.ok(statusLine.includes("BBBB"), "status text should sit on the middle animation row");
-    assert.ok(!statusLine.includes("AAAA"), "top animation row should not carry the status text");
-    assert.ok(!statusLine.includes("CCCC"), "bottom animation row should not carry the status text");
+    assert.ok(statusLine.includes("Tab queue"), "shortcuts stay on the same row");
+    assert.ok(!lines.some((line) => line.includes("AAAA")), "no multi-line animation block");
   });
 
   it("status strip shortcuts are not prefixed with ▌", () => {

@@ -5,11 +5,11 @@
 // rewriting the controller from scratch.
 import { stdin as input, stdout as output } from "node:process";
 import { errorMessage } from "../errors.js";
-import { color } from "../util/ansi.js";
+import { color, rgb } from "../util/ansi.js";
 import { readClipboard, writeClipboard } from "../util/clipboard.js";
 import { handleSlashCommand, COMMANDS } from "./commands.js";
 import { Editor } from "./editor.js";
-import { renderInfinityAnimation } from "./infinity.js";
+import { nodeColorAt } from "./infinity.js";
 import { KeyParser } from "./keys.js";
 import { PromptQueue } from "./prompt-queue.js";
 import { composeFrame } from "./screen.js";
@@ -1525,11 +1525,10 @@ export class Tui {
     buildAgentStatus(width, height) {
         if (this.busy) {
             const elapsed = (Date.now() - this.busy.startedAt) / 1000;
-            const animation = height >= 20 && width >= 64 ? renderInfinityAnimation(elapsed * 1000) : undefined;
+            const pulse = nodeColorAt(elapsed * 1000);
             return {
                 status: "working",
-                frame: "∞",
-                ...(animation ? { animation } : {}),
+                frame: color.bold(rgb(pulse.r, pulse.g, pulse.b)("∞")),
                 currentIntent: this.promptQueue.length > 0
                     ? `${this.busy.label} · ${this.promptQueue.length} queued${this.pendingModelSwitch ? ` · next ${this.pendingModelSwitch}` : ""}`
                     : this.pendingModelSwitch

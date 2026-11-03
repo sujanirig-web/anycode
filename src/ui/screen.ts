@@ -58,14 +58,6 @@ export interface FrameInput {
   statusRight?: string;
 }
 
-/** A multi-line animation rendered beside the status text. */
-export interface StatusAnimation {
-  /** Visible width of each animation line in terminal columns. */
-  width: number;
-  /** Styled animation rows, not padded to the terminal width. */
-  lines: readonly string[];
-}
-
 /** Input for the status strip component. */
 export interface AgentStatusStripInput {
   status: "idle" | "working" | "awaiting_approval" | "error" | "cancelled";
@@ -74,10 +66,8 @@ export interface AgentStatusStripInput {
   totalSteps?: number;
   durationMs?: number;
   relevantShortcuts?: string;
-  /** Animated spinner frame shown when status is "working". */
+  /** Animated spinner frame shown when status is "working". May contain ANSI color. */
   frame?: string;
-  /** Multi-line animation rendered beside the status text while working. */
-  animation?: StatusAnimation;
 }
 
 export interface Frame {
@@ -288,27 +278,7 @@ export function sideBySide(left: string, right: string, width: number): string {
  *         <right-aligned shortcuts>
  */
 export function renderStatusStrip(input: AgentStatusStripInput, width: number): string[] {
-  const safeWidth = Math.max(1, width);
-  const animation = input.animation;
-
-  if (!animation || animation.lines.length === 0 || animation.width < 1) {
-    return [buildStatusLine(input, safeWidth)];
-  }
-
-  // The animation sits on the left; the status text is vertically centered
-  // beside it so "Working" stays readable next to the moving node.
-  const animationGap = 2;
-  const statusWidth = Math.max(1, safeWidth - animation.width - animationGap);
-  const statusLine = buildStatusLine(input, statusWidth);
-  const emptyStatus = " ".repeat(statusWidth);
-  const focusRow = Math.floor(animation.lines.length / 2);
-
-  return animation.lines.map((animationLine, index) =>
-    padToWidth(
-      `${animationLine}${" ".repeat(animationGap)}${index === focusRow ? statusLine : emptyStatus}`,
-      safeWidth,
-    ),
-  );
+  return [buildStatusLine(input, Math.max(1, width))];
 }
 
 /** Build the single status row: icon + status + step/duration + shortcuts. */
@@ -325,39 +295,38 @@ function buildStatusLine(input: AgentStatusStripInput, width: number): string {
   } = input;
 
   const statusText = statusTextFor(status);
-
-  // Build the left portion: icon + status + step info + duration
-  // Format: icon statusText · step X · duration · intent
-  const leftParts: string[] = [];
   const icon = status === "working" && input.frame ? input.frame : statusIconFor(status);
-  leftParts.push(`${icon} ${statusText}`);
+  const heading = `${icon} ${statusText}`;
 
+  // Keep the icon out of truncation: it may carry ANSI color, and it is the
+  // one part of the strip that should never be clipped.
+  const details: string[] = [];
   if (currentStep !== undefined && totalSteps !== undefined) {
-    leftParts.push(`step ${currentStep} · ${totalSteps}`);
+    details.push(`step ${currentStep} · ${totalSteps}`);
   } else if (currentStep !== undefined) {
-    leftParts.push(`step ${currentStep}`);
+    details.push(`step ${currentStep}`);
   }
 
   if (durationMs !== undefined) {
-    leftParts.push(formatDuration(durationMs));
+    details.push(formatDuration(durationMs));
   }
 
   if (currentIntent) {
-    leftParts.push(truncateWidth(currentIntent, Math.max(0, safeWidth - 20)));
+    details.push(truncateWidth(currentIntent, Math.max(0, safeWidth - 20)));
   }
 
-  let leftPart = leftParts.join(" · ");
   let rightPart = relevantShortcuts ?? "";
+  rightPart = truncateWidth(rightPart, Math.max(0, safeWidth - stringWidth(heading) - 4));
 
-  // Keep the strip inside the frame when the status or shortcuts are long.
-  const rightBudget = Math.max(0, safeWidth - 10);
-  rightPart = truncateWidth(rightPart, rightBudget);
+  const rightWidth = stringWidth(rightPart);
+  const detailsBudget = Math.max(0, safeWidth - stringWidth(heading) - rightWidth - 4);
+  const detailText = details.length > 0 ? ` · ${details.join(" · ")}` : "";
+  const leftPart = `${heading}${truncateWidth(detailText, detailsBudget)}`;
 
-  const budget = Math.max(4, safeWidth - stringWidth(rightPart) - 4);
-  leftPart = truncateWidth(leftPart, budget);
-
-  const gap = Math.max(1, safeWidth - stringWidth(leftPart) - stringWidth(rightPart) - 2);
-  const line = `  ${leftPart}${" ".repeat(gap)}${rightPart}`;
+  const gap = Math.max(1, safeWidth - stringWidth(leftPart) - rightWidth - 2);
+  let line = `  ${leftPart}${" ".repeat(gap)}${rightPart}`;
+  // Extreme narrow terminals: fall back to plain text so the row never overflows.
+  if (stringWidth(line) > safeWidth) line = truncateWidth(stripAnsi(line), safeWidth);
   return padToWidth(line, safeWidth);
 }
 
