@@ -37,7 +37,7 @@ describe("infinity loading animation", () => {
   it("exposes a compact animation block next to the wider brand mark", () => {
     const animation = renderInfinityAnimation(650);
     assert.equal(animation.lines.length, 3);
-    assert.equal(animation.width, 10);
+    assert.equal(animation.width, 8);
     for (const line of animation.lines) assert.equal(stringWidth(line), animation.width);
 
     const mark = renderInfinityMark();

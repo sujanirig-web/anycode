@@ -2,11 +2,11 @@ import { color, rgb } from "../util/ansi.js";
 
 /**
  * Braille infinity loops with a node tracing the path. Two grids share the same
- * curve: a compact 10x3 loader that leaves room for the status text beside it,
+ * curve: a compact 8x3 loader that leaves room for the status text beside it,
  * and the wider 15x3 brand mark that balances the ANYCODE wordmark. Both keep
  * the same height so the lobes and the crossing stay readable.
  */
-const LOADER_WIDTH = 10;
+const LOADER_WIDTH = 8;
 const LOADER_HEIGHT = 3;
 const BRAND_WIDTH = 15;
 const BRAND_HEIGHT = 3;
