@@ -2,18 +2,16 @@ import { color, rgb } from "../util/ansi.js";
 
 /**
  * Braille infinity loops with a node tracing the path. Two grids share the same
- * curve: a compact 8x3 loader that leaves room for the status text beside it,
- * and the wider 15x3 brand mark that balances the ANYCODE wordmark. Both keep
- * the same height so the lobes and the crossing stay readable.
+ * curve: the compact 10x2 loader and the wider 15x3 brand mark. The loader is an
+ * exact two-thirds scale of the brand, so its proportions never stretch.
  */
-const LOADER_WIDTH = 8;
-const LOADER_HEIGHT = 3;
+const LOADER_WIDTH = 10;
+const LOADER_HEIGHT = 2;
 const BRAND_WIDTH = 15;
 const BRAND_HEIGHT = 3;
 const PATH_SAMPLES = 720;
 const PERIOD_MS = 2600;
-const TRAIL_LENGTH = 3;
-const TRAIL_STEP = 0.16;
+const TRAIL_LENGTH = 2;
 
 /** Time for the node to drift from purple to red and back again. */
 export const INFINITY_COLOR_CYCLE_MS = 45_000;
@@ -40,13 +38,22 @@ interface DotPoint {
   y: number;
 }
 
-/** A braille path plus the node mapping for one grid size. */
+/** A drawn cell and how far along the loop it sits. */
+interface PathCell {
+  row: number;
+  column: number;
+  /** Arc length from the loop start, in dot units. */
+  distance: number;
+}
+
+/** A braille path plus the ordered loop the node travels along. */
 interface InfinityGrid {
   width: number;
-  height: number;
   cells: readonly (readonly number[])[];
-  /** Cell occupied by the node at curve parameter `t`. */
-  cellFor(t: number): { row: number; column: number };
+  /** Cells in traversal order, so the node always sits on the stroke. */
+  loop: readonly PathCell[];
+  /** Total arc length of the loop in dot units. */
+  length: number;
 }
 
 /** Point on a horizontal Bernoulli lemniscate, mapped into dot space. */
@@ -60,11 +67,22 @@ function lemniscate(t: number, dotWidth: number, dotHeight: number): DotPoint {
   };
 }
 
-/** Precompute the braille path once per grid so each frame only moves the node. */
+/**
+ * Precompute the braille path once per grid so each frame only has to move the
+ * node. Samples are accumulated into an ordered loop with cumulative arc length;
+ * `loopIndexAt` then turns a fraction of the loop into a cell, which keeps the
+ * node moving at a steady speed instead of speeding up through the crossing.
+ */
 function createGrid(width: number, height: number): InfinityGrid {
   const dotWidth = width * 2;
   const dotHeight = height * 4;
   const cells = Array.from({ length: height }, () => Array<number>(width).fill(0));
+  const loop: PathCell[] = [];
+  let previous: DotPoint | undefined;
+  let first: DotPoint | undefined;
+  let length = 0;
+  let lastKey = "";
+
   for (let sample = 0; sample < PATH_SAMPLES; sample++) {
     const point = lemniscate((sample / PATH_SAMPLES) * Math.PI * 2, dotWidth, dotHeight);
     const dotX = Math.round(point.x);
@@ -72,25 +90,58 @@ function createGrid(width: number, height: number): InfinityGrid {
     const cellX = Math.floor(dotX / 2);
     const cellY = Math.floor(dotY / 4);
     const row = cells[cellY];
-    if (!row || row[cellX] === undefined) continue;
-    row[cellX]! |= DOT_BITS[dotX % 2]![dotY % 4] ?? 0;
+    if (row && row[cellX] !== undefined) {
+      row[cellX]! |= DOT_BITS[dotX % 2]![dotY % 4] ?? 0;
+    }
+
+    if (previous) {
+      length += Math.hypot(dotX - previous.x, dotY - previous.y);
+    } else {
+      first = { x: dotX, y: dotY };
+    }
+
+    const key = `${cellY}:${cellX}`;
+    if (key !== lastKey && row?.[cellX] !== undefined) {
+      lastKey = key;
+      loop.push({ row: cellY, column: cellX, distance: length });
+    }
+    previous = { x: dotX, y: dotY };
   }
-  return {
-    width,
-    height,
-    cells,
-    cellFor(t: number) {
-      const point = lemniscate(t, dotWidth, dotHeight);
-      return {
-        row: Math.min(height - 1, Math.max(0, Math.floor(Math.round(point.y) / 4))),
-        column: Math.min(width - 1, Math.max(0, Math.floor(Math.round(point.x) / 2))),
-      };
-    },
-  };
+
+  // Close the loop so the last cell sits next to the first one.
+  if (first && previous) length += Math.hypot(first.x - previous.x, first.y - previous.y);
+
+  const head = loop[0];
+  const tail = loop[loop.length - 1];
+  if (loop.length > 1 && head && tail && head.row === tail.row && head.column === tail.column) {
+    loop.pop();
+  }
+
+  return { width, cells, loop, length };
 }
 
 const LOADER_GRID = createGrid(LOADER_WIDTH, LOADER_HEIGHT);
 const BRAND_GRID = createGrid(BRAND_WIDTH, BRAND_HEIGHT);
+
+/** Index of the loop cell at `fraction` (0..1) of the total arc length. */
+function loopIndexAt(grid: InfinityGrid, fraction: number): number {
+  const wrapped = ((fraction % 1) + 1) % 1;
+  const target = wrapped * grid.length;
+  let low = 0;
+  let high = grid.loop.length - 1;
+  let best = 0;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const cell = grid.loop[mid];
+    if (cell && cell.distance <= target) {
+      best = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
 
 function mixColor(from: RgbColor, to: RgbColor, amount: number): RgbColor {
   return {
@@ -118,13 +169,14 @@ function trailColorAt(elapsedMs: number, index: number): RgbColor {
 
 /** Render the infinity path with a node tracing it. */
 export function renderInfinityFrame(elapsedMs: number): string[] {
-  const phase = ((elapsedMs % PERIOD_MS) / PERIOD_MS) * Math.PI * 2;
-  const node = LOADER_GRID.cellFor(phase);
+  const index = loopIndexAt(LOADER_GRID, (elapsedMs % PERIOD_MS) / PERIOD_MS);
+  const node = LOADER_GRID.loop[index] ?? { row: 0, column: 0, distance: 0 };
   const nodeColor = nodeColorAt(elapsedMs);
   const trail = new Map<string, number>();
-  for (let index = 1; index <= TRAIL_LENGTH; index++) {
-    const point = LOADER_GRID.cellFor(phase - index * TRAIL_STEP);
-    trail.set(`${point.row}:${point.column}`, index);
+  for (let step = 1; step <= TRAIL_LENGTH; step++) {
+    const trailIndex = (index - step + LOADER_GRID.loop.length) % LOADER_GRID.loop.length;
+    const point = LOADER_GRID.loop[trailIndex];
+    if (point) trail.set(`${point.row}:${point.column}`, step);
   }
 
   return LOADER_GRID.cells.map((rowCells, row) =>

@@ -20,7 +20,7 @@ import { stringWidth } from "../src/util/width.js";
 describe("infinity loading animation", () => {
   it("renders a braille infinity with a visible node", () => {
     const frame = renderInfinityFrame(0);
-    assert.equal(frame.length, 3);
+    assert.equal(frame.length, 2);
     const text = frame.join("\n");
     assert.match(text, /●/);
     assert.match(text, /[\u2801-\u28ff]/);
@@ -36,8 +36,8 @@ describe("infinity loading animation", () => {
 
   it("exposes a compact animation block next to the wider brand mark", () => {
     const animation = renderInfinityAnimation(650);
-    assert.equal(animation.lines.length, 3);
-    assert.equal(animation.width, 8);
+    assert.equal(animation.lines.length, 2);
+    assert.equal(animation.width, 10);
     for (const line of animation.lines) assert.equal(stringWidth(line), animation.width);
 
     const mark = renderInfinityMark();
@@ -62,7 +62,7 @@ describe("infinity loading animation", () => {
   it("keeps the loop running for any elapsed time", () => {
     for (const elapsed of [1, 1234567, -250]) {
       const frame = renderInfinityFrame(elapsed);
-      assert.equal(frame.length, 3);
+      assert.equal(frame.length, 2);
       assert.match(frame.join("\n"), /●/);
     }
   });
