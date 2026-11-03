@@ -794,7 +794,30 @@ describe("composeFrame", () => {
     assert.ok(text.includes("Ctrl+Q manage"), "Working status should expose queue management");
   });
 
-  it("keeps the working status on one row with the infinity glyph", () => {
+  it("renders the working infinity icon beside the status text", () => {
+    const result = frame({
+      agentName: "Cavehound",
+      agentMode: "running",
+      composer: { text: "", cursor: 0 },
+      agentStatus: {
+        status: "working",
+        glyph: { width: 4, lines: ["AAAA", "BBBB", "CCCC"] },
+        currentIntent: "thinking",
+        durationMs: 1000,
+        relevantShortcuts: "Tab queue",
+      },
+    });
+    const lines = result.lines.map(plain);
+    const statusRow = lines.findIndex((line) => line.includes("Working"));
+    assert.ok(statusRow >= 0, "working status should render");
+    assert.ok(lines[statusRow]!.includes("BBBB"), "status text should sit on the middle icon row");
+    assert.ok(!lines[statusRow]!.includes("AAAA"), "top icon row should not carry the status text");
+    assert.ok(!lines[statusRow]!.includes("CCCC"), "bottom icon row should not carry the status text");
+    assert.ok(lines[statusRow]!.includes("Tab queue"), "shortcuts stay on the status row");
+    assert.ok(lines.some((line) => line.includes("AAAA")), "top icon row should render on its own line");
+  });
+
+  it("falls back to the single-row glyph when no icon is supplied", () => {
     const result = frame({
       agentName: "Cavehound",
       agentMode: "running",
@@ -811,7 +834,6 @@ describe("composeFrame", () => {
     const statusLine = lines.find((line) => line.includes("∞ Working"));
     assert.ok(statusLine, "working status should render");
     assert.ok(statusLine.includes("Tab queue"), "shortcuts stay on the same row");
-    assert.ok(!lines.some((line) => line.includes("AAAA")), "no multi-line animation block");
   });
 
   it("status strip shortcuts are not prefixed with ▌", () => {

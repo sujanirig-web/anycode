@@ -9,7 +9,7 @@ import { color, rgb } from "../util/ansi.js";
 import { readClipboard, writeClipboard } from "../util/clipboard.js";
 import { handleSlashCommand, COMMANDS } from "./commands.js";
 import { Editor } from "./editor.js";
-import { nodeColorAt } from "./infinity.js";
+import { INFINITY_ICON_WIDTH, nodeColorAt, renderInfinityIcon } from "./infinity.js";
 import { KeyParser } from "./keys.js";
 import { PromptQueue } from "./prompt-queue.js";
 import { composeFrame } from "./screen.js";
@@ -1526,9 +1526,12 @@ export class Tui {
         if (this.busy) {
             const elapsed = (Date.now() - this.busy.startedAt) / 1000;
             const pulse = nodeColorAt(elapsed * 1000);
+            const showGlyph = height >= 16 && width >= 52;
             return {
                 status: "working",
-                frame: color.bold(rgb(pulse.r, pulse.g, pulse.b)("∞")),
+                ...(showGlyph
+                    ? { glyph: { width: INFINITY_ICON_WIDTH, lines: renderInfinityIcon(elapsed * 1000) } }
+                    : { frame: color.bold(rgb(pulse.r, pulse.g, pulse.b)("∞")) }),
                 currentIntent: this.promptQueue.length > 0
                     ? `${this.busy.label} · ${this.promptQueue.length} queued${this.pendingModelSwitch ? ` · next ${this.pendingModelSwitch}` : ""}`
                     : this.pendingModelSwitch

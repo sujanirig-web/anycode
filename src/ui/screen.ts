@@ -58,6 +58,14 @@ export interface FrameInput {
   statusRight?: string;
 }
 
+/** A multi-row mark rendered to the left of the status text. */
+export interface StatusGlyph {
+  /** Visible width of each glyph row in terminal columns. */
+  width: number;
+  /** Styled glyph rows. They may contain ANSI color and are not padded. */
+  lines: readonly string[];
+}
+
 /** Input for the status strip component. */
 export interface AgentStatusStripInput {
   status: "idle" | "working" | "awaiting_approval" | "error" | "cancelled";
@@ -66,8 +74,10 @@ export interface AgentStatusStripInput {
   totalSteps?: number;
   durationMs?: number;
   relevantShortcuts?: string;
-  /** Animated spinner frame shown when status is "working". May contain ANSI color. */
+  /** Single-cell spinner frame shown when status is "working". May contain ANSI color. */
   frame?: string;
+  /** Multi-row working icon; replaces `frame` and the built-in status icon. */
+  glyph?: StatusGlyph;
 }
 
 export interface Frame {
@@ -278,11 +288,34 @@ export function sideBySide(left: string, right: string, width: number): string {
  *         <right-aligned shortcuts>
  */
 export function renderStatusStrip(input: AgentStatusStripInput, width: number): string[] {
-  return [buildStatusLine(input, Math.max(1, width))];
+  const safeWidth = Math.max(1, width);
+  const glyph = input.glyph;
+
+  if (!glyph || glyph.lines.length === 0 || glyph.width < 1) {
+    return [buildStatusLine(input, safeWidth)];
+  }
+
+  // The icon sits on the left; the status text is vertically centered beside
+  // it so it lines up with the waist of the infinity.
+  const glyphGap = 2;
+  const glyphIndent = 1;
+  const statusWidth = Math.max(1, safeWidth - glyph.width - glyphGap - glyphIndent);
+  const statusLine = buildStatusLine(input, statusWidth, false);
+  const blankStatus = " ".repeat(statusWidth);
+  const focusRow = Math.floor(glyph.lines.length / 2);
+
+  return glyph.lines.map((glyphLine, index) =>
+    padToWidth(
+      `${" ".repeat(glyphIndent)}${glyphLine}${" ".repeat(glyphGap)}${
+        index === focusRow ? statusLine : blankStatus
+      }`,
+      safeWidth,
+    ),
+  );
 }
 
 /** Build the single status row: icon + status + step/duration + shortcuts. */
-function buildStatusLine(input: AgentStatusStripInput, width: number): string {
+function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon = true): string {
   const safeWidth = Math.max(1, width);
 
   const {
@@ -296,7 +329,7 @@ function buildStatusLine(input: AgentStatusStripInput, width: number): string {
 
   const statusText = statusTextFor(status);
   const icon = status === "working" && input.frame ? input.frame : statusIconFor(status);
-  const heading = `${icon} ${statusText}`;
+  const heading = showIcon ? `${icon} ${statusText}` : statusText;
 
   // Keep the icon out of truncation: it may carry ANSI color, and it is the
   // one part of the strip that should never be clipped.
