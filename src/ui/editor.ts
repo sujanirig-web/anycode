@@ -1,4 +1,4 @@
-import type { KeyEvent, KeyPress } from "./keys.js";
+import type { KeyPress, TextInput } from "./keys.js";
 
 export type EditResult =
   | { type: "changed" }
@@ -127,7 +127,7 @@ export class Editor {
     return true;
   }
 
-  handle(key: KeyEvent): EditResult {
+  handle(key: KeyPress | TextInput): EditResult {
     if (key.type === "text") {
       if (key.text.length === 0) return { type: "unhandled", key: { type: "key", name: "text" } };
       this.insert(key.text);

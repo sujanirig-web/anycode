@@ -7,12 +7,16 @@ export interface KeyPress {
   shift?: boolean;
 }
 
+export interface MouseEvent {
+  type: "mouse";
+}
+
 export interface TextInput {
   type: "text";
   text: string;
 }
 
-export type KeyEvent = KeyPress | TextInput;
+export type KeyEvent = KeyPress | MouseEvent | TextInput;
 
 const PRINTABLE = /^[A-Za-z0-9]$/;
 
@@ -183,6 +187,14 @@ export class KeyParser {
       }
 
       if (buffer[1] === "[") {
+        // Mouse protocol (SGR mode ?1006h): \e[<{button};{x};{y}[Mm]
+        // Consume and ignore mouse events so only the keyboard scrolls.
+        const mouseMatch = /^\u001b\[<[0-9;]*[Mm]/.exec(buffer);
+        if (mouseMatch) {
+          buffer = buffer.slice(mouseMatch[0].length);
+          events.push({ type: "mouse" });
+          continue;
+        }
         const match = /^\u001b\[([0-9;?]*)([@-~])/.exec(buffer);
         if (!match) {
           if (!final) break;

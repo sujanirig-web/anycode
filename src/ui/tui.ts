@@ -70,6 +70,9 @@ export class Tui {
     /** Files touched during the current turn, shown in the status strip. */
     changedFiles = new Set();
     scroll = 0;
+    /** True when the user has manually scrolled the transcript; pauses
+     * auto-follow-to-bottom while the agent is still talking. */
+    userScrolled = false;
     expanded = false;
     busy;
     approval;
@@ -145,7 +148,7 @@ export class Tui {
         }
     }
     enter() {
-        output.write(`${ALT_ON}${PASTE_ON}\u001b[2J\u001b[H${CURSOR_OFF}`);
+        output.write(`${ALT_ON}${PASTE_ON}\u001b[?1006h\u001b[2J\u001b[H${CURSOR_OFF}`);
         input.setRawMode?.(true);
         input.setEncoding("utf8");
         input.resume();
@@ -163,7 +166,7 @@ export class Tui {
         }
     }
     restore = () => {
-        output.write(`${PASTE_OFF}${CURSOR_ON}${ALT_OFF}`);
+        output.write(`${PASTE_OFF}${CURSOR_ON}\u001b[?1006l${ALT_OFF}`);
     };
     cleanup() {
         if (this.cleaned)
@@ -210,6 +213,9 @@ export class Tui {
     onData = (chunk) => {
         const events = this.parser.push(chunk);
         for (const event of events) {
+            // Ignore mouse events (wheel, clicks) so only the keyboard
+            // scrolls the transcript.
+            if (event.type === "mouse") continue;
             if (this.approval) {
                 this.handleApprovalKey(event);
                 continue;
@@ -1477,6 +1483,7 @@ export class Tui {
         const maxScroll = Math.max(0, transcriptLines - 1);
         const currentTarget = this.scrollTimer ? this.scrollTarget : this.scroll;
         this.scrollTarget = clamp(currentTarget + delta, 0, maxScroll);
+        this.userScrolled = true;
         if (this.scrollTimer)
             return;
         const animate = () => {
@@ -1497,6 +1504,7 @@ export class Tui {
         this.scrollTimer = undefined;
         this.scroll = 0;
         this.scrollTarget = 0;
+        this.userScrolled = false;
     }
     /** Snap the transcript to the newest line. */
     jumpToLatest() {
@@ -1582,11 +1590,16 @@ export class Tui {
         const height = Math.max(6, output.rows ?? 24);
         const lines = this.transcript.render(Math.max(10, width - 2), this.expanded, Date.now());
         let frame = this.compose(width, height, lines);
-        // Preserve the user's scroll position; only adjust if we've gone past the
-        // new bottom (e.g. fresh turn) or past the new top. Do not clamp to 0
-        // arbitrarily – that makes the transcript feel "stuck" at the bottom.
+        // When the agent is still talking and the user hasn't manually
+        // scrolled, keep following the transcript to the bottom so new
+        // messages appear as they arrive. Once the user scrolls with Up/
+        // Down/PageUp/PageDown, auto-follow pauses until they jump to latest.
         const newMax = Math.max(0, lines.length - frame.bodyHeight);
-        if (this.scroll > newMax) {
+        if (this.busy && !this.userScrolled) {
+            this.scroll = newMax;
+            this.scrollTarget = newMax;
+            frame = this.compose(width, height, lines);
+        } else if (this.scroll > newMax) {
             // user scrolled up; snap to the new max but don't force to 0
             this.scroll = newMax;
             frame = this.compose(width, height, lines);
