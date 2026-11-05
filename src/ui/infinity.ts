@@ -17,6 +17,12 @@ const PATH_SAMPLES = 720;
 /** Time for the working infinity to drift from purple to red and back again. */
 export const INFINITY_COLOR_CYCLE_MS = 45_000;
 
+/** Time for the highlight to travel once around the working infinity. */
+export const INFINITY_SPIN_MS = 1_800;
+
+/** Fraction of the loop covered by the fading tail behind the highlight. */
+const GLOW_TAIL = 0.13;
+
 interface RgbColor {
   r: number;
   g: number;
@@ -25,6 +31,7 @@ interface RgbColor {
 
 const NODE_PURPLE: RgbColor = { r: 168, g: 85, b: 247 };
 const NODE_RED: RgbColor = { r: 239, g: 68, b: 68 };
+const NODE_HIGHLIGHT: RgbColor = { r: 250, g: 246, b: 255 };
 
 /** Braille bit for a sub-dot at (dx, dy) inside a 2x4 cell. */
 const DOT_BITS: readonly (readonly number[])[] = [
@@ -71,6 +78,40 @@ function buildPath(width: number, height: number): number[][] {
 const BRAND_CELLS = buildPath(BRAND_WIDTH, BRAND_HEIGHT);
 const ICON_CELLS = buildPath(ICON_WIDTH, ICON_HEIGHT);
 
+interface GlowTrackCell {
+  row: number;
+  column: number;
+  /** Path positions that map to this braille cell, in 0..1 loop units. */
+  angles: number[];
+}
+
+/** Precompute which loop positions light each braille cell. */
+function buildGlowTrack(width: number, height: number): GlowTrackCell[] {
+  const dotWidth = width * 2;
+  const dotHeight = height * 4;
+  const cells = new Map<string, GlowTrackCell>();
+
+  for (let sample = 0; sample < PATH_SAMPLES; sample++) {
+    const angle = sample / PATH_SAMPLES;
+    const point = lemniscate(angle * Math.PI * 2, dotWidth, dotHeight);
+    const column = Math.floor(Math.round(point.x) / 2);
+    const row = Math.floor(Math.round(point.y) / 4);
+    if (row < 0 || row >= height || column < 0 || column >= width) continue;
+
+    const key = `${row}:${column}`;
+    let cell = cells.get(key);
+    if (!cell) {
+      cell = { row, column, angles: [] };
+      cells.set(key, cell);
+    }
+    cell.angles.push(angle);
+  }
+
+  return [...cells.values()];
+}
+
+const ICON_GLOW_TRACK = buildGlowTrack(ICON_WIDTH, ICON_HEIGHT);
+
 function toLine(rowCells: readonly number[]): string {
   return rowCells
     .map((bits) => (bits === 0 ? " " : String.fromCharCode(0x2800 + bits)))
@@ -95,6 +136,41 @@ export function nodeColorAt(elapsedMs: number): RgbColor {
   return mixColor(NODE_PURPLE, NODE_RED, phase);
 }
 
+export interface InfinityGlow {
+  row: number;
+  column: number;
+  /** 0..1; 1 at the head of the travelling highlight. */
+  intensity: number;
+}
+
+/**
+ * Cells lit by the moving highlight at a point in time. The head is at full
+ * intensity and the tail fades smoothly behind it, wrapping around the loop.
+ */
+export function infinityGlow(elapsedMs: number): InfinityGlow[] {
+  const wrapped = ((elapsedMs % INFINITY_SPIN_MS) + INFINITY_SPIN_MS) % INFINITY_SPIN_MS;
+  const phase = wrapped / INFINITY_SPIN_MS;
+  const lit: InfinityGlow[] = [];
+
+  for (const cell of ICON_GLOW_TRACK) {
+    let distance = Infinity;
+    for (const angle of cell.angles) {
+      const behind = (phase - angle + 1) % 1;
+      if (behind < distance) distance = behind;
+    }
+    if (distance > GLOW_TAIL) continue;
+
+    const falloff = 1 - distance / GLOW_TAIL;
+    lit.push({
+      row: cell.row,
+      column: cell.column,
+      intensity: falloff * falloff * (3 - 2 * falloff),
+    });
+  }
+
+  return lit;
+}
+
 /** Visible width of the brand mark in terminal columns. */
 export const INFINITY_WIDTH = BRAND_WIDTH;
 
@@ -110,11 +186,26 @@ export function renderInfinityMark(): string[] {
 }
 
 /**
- * Working infinity icon for the status strip. The whole mark takes the pulsing
- * color so it reads as one object rather than a lit node on a track.
+ * Working infinity icon for the status strip. The mark keeps its pulsing color
+ * while a soft, fading highlight travels around the path, so the loader reads
+ * as one polished object instead of a bullet sliding over the logo.
  */
 export function renderInfinityIcon(elapsedMs: number): string[] {
   const pulse = nodeColorAt(elapsedMs);
-  const paint = rgb(pulse.r, pulse.g, pulse.b);
-  return ICON_CELLS.map((rowCells) => color.bold(paint(toLine(rowCells))));
+  const glow = new Map(
+    infinityGlow(elapsedMs).map(
+      (cell) => [`${cell.row}:${cell.column}`, cell.intensity] as const,
+    ),
+  );
+
+  return ICON_CELLS.map((rowCells, row) =>
+    rowCells
+      .map((bits, column) => {
+        if (bits === 0) return " ";
+        const intensity = glow.get(`${row}:${column}`) ?? 0;
+        const tint = mixColor(pulse, NODE_HIGHLIGHT, intensity);
+        return color.bold(rgb(tint.r, tint.g, tint.b)(String.fromCharCode(0x2800 + bits)));
+      })
+      .join(""),
+  );
 }

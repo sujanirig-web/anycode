@@ -2,12 +2,22 @@ import type { Session } from "../agent/session.js";
 import { color } from "../util/ansi.js";
 import { oneLine } from "../util/text.js";
 import { wrapText } from "../util/wrap.js";
-import { describeCall, summarizeToolResult } from "./renderer.js";
+import { describeCall, describeFileChange, summarizeToolResult } from "./renderer.js";
 import type { ToolCall, Usage } from "../types.js";
+import type { FileChange } from "../tools/types.js";
 import type { ActivityCard } from "./activity.js";
 import { renderCardPanel } from "./card.js";
 
-type BlockKind = "user" | "assistant" | "tool" | "result" | "notice" | "error" | "info" | "activity";
+type BlockKind =
+  | "user"
+  | "assistant"
+  | "tool"
+  | "result"
+  | "change"
+  | "notice"
+  | "error"
+  | "info"
+  | "activity";
 
 interface RenderCache {
   width: number;
@@ -27,6 +37,7 @@ interface Block {
   cache?: RenderCache;
   card?: ActivityCard;
   usage?: Usage;
+  change?: FileChange;
 }
 
 const CODE_GUTTER = "  │ ";
@@ -34,6 +45,9 @@ const RESULT_GUTTER = "  ⎿ ";
 const USER_PREFIX = color.green("› ");
 const TOOL_PREFIX = color.gray("⏺ ");
 const RESULT_PREFIX = color.gray("⎿ ");
+const CHANGE_PREFIX = color.cyan("✎ ");
+const MAX_COLLAPSED_CHANGE_LINES = 24;
+const MAX_EXPANDED_CHANGE_LINES = 200;
 
 function colorizeInline(line: string): string {
   return line.replace(/`([^`]+)`/g, (_match, code: string) => color.cyan(code));
@@ -116,6 +130,10 @@ export class Transcript {
 
   pushActivity(card: ActivityCard): void {
     this.blocks.push({ kind: "activity", text: card.intent, card });
+  }
+
+  pushFileChange(change: FileChange): void {
+    this.blocks.push({ kind: "change", text: change.path, change });
   }
 
   /**
@@ -271,7 +289,7 @@ export class Transcript {
       case "activity": {
         const card = block.card;
         if (!card || card.steps.length === 0) return [];
-        return renderCardPanel(card, Math.max(10, width - 2), undefined, animationFrame);
+        return renderCardPanel(card, Math.max(10, width - 2), undefined, animationFrame, expanded);
       }
 
       case "result": {
@@ -300,6 +318,29 @@ export class Transcript {
         }
         if (lines.length > limit) {
           out.push(color.gray(`    … ${lines.length - limit} more lines`));
+        }
+        return out;
+      }
+
+      case "change": {
+        const change = block.change;
+        if (!change) return [];
+        const out = [`${CHANGE_PREFIX}${color.bold(describeFileChange(change))}`];
+        if (!change.diff) return out;
+
+        const diffLines = change.diff.split(/\r?\n/);
+        const limit = expanded ? MAX_EXPANDED_CHANGE_LINES : MAX_COLLAPSED_CHANGE_LINES;
+        const shown = diffLines.slice(0, limit);
+        for (const line of shown) out.push(`  ${paintDiffLine(line)}`);
+        if (diffLines.length > limit) {
+          const remaining = diffLines.length - limit;
+          out.push(
+            color.gray(
+              `  … ${remaining} more ${remaining === 1 ? "line" : "lines"}${
+                expanded ? "" : " (Ctrl+O to expand)"
+              }`,
+            ),
+          );
         }
         return out;
       }

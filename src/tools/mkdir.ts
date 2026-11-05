@@ -43,6 +43,7 @@ export const mkdirTool: Tool = {
 
     await fs.mkdir(target, { recursive: true });
 
+    ctx.onFileChange?.({ kind: "mkdir", path: relative, directory: true });
     return `Created directory ${relative}`;
   },
 };

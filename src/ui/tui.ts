@@ -67,6 +67,8 @@ export class Tui {
     promptQueue = new PromptQueue();
     painter = new Painter(output);
     tracker = new ActivityTracker();
+    /** Files touched during the current turn, shown in the status strip. */
+    changedFiles = new Set();
     scroll = 0;
     expanded = false;
     busy;
@@ -1298,6 +1300,7 @@ export class Tui {
             }
             if (this.state.session.id !== before) {
                 this.transcript.clear();
+                this.changedFiles.clear();
                 if (this.state.session.messages.length > 0)
                     this.transcript.hydrate(this.state.session);
                 this.hasSentFirstMessage = this.state.session.messages.some((message) => message.role === "user");
@@ -1321,6 +1324,10 @@ export class Tui {
             return;
         }
         this.finishActivity();
+        this.changedFiles.clear();
+        // Title the live coding box with the user's request so the work is
+        // framed by the task, not by whichever tool happened to run first.
+        this.tracker.startCard(text.trim());
         this.transcript.pushUser(text);
         this.hasSentFirstMessage = true;
         this.resetScroll();
@@ -1378,7 +1385,7 @@ export class Tui {
     }
     finishActivity() {
         const card = this.tracker.finishCurrentCard();
-        if (card && card.steps.length > 0) {
+        if (card && (card.steps.length > 0 || (card.changes?.length ?? 0) > 0)) {
             this.transcript.updateCurrentActivity(card);
         }
     }
@@ -1415,6 +1422,13 @@ export class Tui {
                     const card = this.tracker.currentCard;
                     if (card) this.transcript.updateCurrentActivity(card);
                 }
+                this.paint();
+                break;
+            }
+            case "file_change": {
+                this.changedFiles.add(event.change.path);
+                const card = this.tracker.addChange(event.change);
+                this.transcript.updateCurrentActivity(card);
                 this.paint();
                 break;
             }
@@ -1540,6 +1554,7 @@ export class Tui {
                 currentStep: undefined,
                 totalSteps: undefined,
                 durationMs: elapsed * 1000,
+                changedFiles: this.changedFiles.size,
                 relevantShortcuts: "Tab queue · Ctrl+Q manage",
             };
         }
@@ -1550,6 +1565,7 @@ export class Tui {
                 currentStep: undefined,
                 totalSteps: undefined,
                 durationMs: undefined,
+                changedFiles: this.changedFiles.size,
                 relevantShortcuts: "y run · a always · n cancel",
             };
         }

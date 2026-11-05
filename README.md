@@ -15,10 +15,17 @@ anycode v0.2.0 ─────────────────────�
 
   › add a retry helper to src/http.ts and run the tests
 
-  ⏺ read src/http.ts
-    ⎿ src/http.ts (lines 1-84 of 84)
-  ⏺ edit src/http.ts (+18 -0)
-    ⎿ Updated src/http.ts (+18 -0, 1 replacement)
+  ┌─ ▾ add a retry helper to src/http.ts · 2 steps · 1 file ──────────┐
+  │                                                                  │
+  │ ├─ ✓ read  src/http.ts                                   (0.1s)  │
+  │ └─ ⋯ edit  src/http.ts                                          │
+  │                                                                  │
+  │ ✎ update src/http.ts (+18 -0)                                    │
+  │     @@ -1,0 +1,18 @@                                              │
+  │     +export async function withRetry() {                          │
+  │     +  // ...                                                     │
+  └──────────────────────────────────────────────────────────────────┘
+
   ⏺ bash npm test
     ⎿ status: exit code 0 · 34 tests passed
 
@@ -41,8 +48,14 @@ anycode v0.2.0 ─────────────────────�
 - **Provider-agnostic** — Anthropic Messages API, OpenAI Chat Completions, any
   OpenAI-compatible gateway, Ollama, or a local AnyRoute gateway. Streaming
   everywhere, with retries on 429/5xx.
-- **Useful tools** — `read`, `write`, `edit`, `bash`, `glob`, `grep`, with
-  path safety, binary detection, output truncation, and recovery hints.
+- **Useful tools** — `read`, `write`, `edit`, `bash`, `glob`, `grep`,
+  `websearch`, with path safety, binary detection, output truncation, and
+  recovery hints.
+- **Live coding box** — each request opens a bordered activity box titled with
+  what you asked for. Tool steps, timings, status, and colored file diffs update
+  inside it in realtime. When the turn finishes the box collapses to a compact
+  change list; `ctrl+o` reveals the full diffs, and the status strip keeps a
+  changed-file count.
 - **Approval gates** — writes, edits, and shell commands ask first. Approve once,
   always for the session, or disable prompts with `--yolo`.
 - **Sessions** — every turn is saved to `.anycode/sessions/<id>.json`. Resume
@@ -213,6 +226,7 @@ given.
 {"type":"turn_start","step":1}
 {"type":"tool_start","call":{"id":"call_1","name":"write","arguments":"{\"path\":\"a.txt\",\"content\":\"hi\"}"},"input":{"path":"a.txt","content":"hi"}}
 {"type":"tool_end","call":{"id":"call_1","name":"write","arguments":"..."},"content":"Wrote a.txt (2 B, 1 lines)","isError":false,"durationMs":3}
+{"type":"file_change","change":{"kind":"create","path":"a.txt","diff":"@@ -0,0 +1,1 @@\n+hi","added":1,"removed":0}}
 {"type":"text","text":"Done."}
 {"type":"usage","usage":{"inputTokens":120,"outputTokens":8,"cacheReadTokens":0,"cacheWriteTokens":0}}
 {"type":"done","steps":1,"usage":{"...":"..."},"aborted":false}
@@ -274,6 +288,7 @@ Slash commands:
 | `read` | yes | Read a text file with line numbers, paged via `offset`/`limit` |
 | `glob` | yes | Find files by glob, newest first |
 | `grep` | yes | Regex search with ripgrep when available, built-in fallback |
+| `websearch` | yes | Keyless DuckDuckGo search returning titles, URLs and snippets |
 | `write` | no | Create or replace a file, with a diff preview |
 | `edit` | no | Exact-string replacement, fails on missing/ambiguous matches |
 | `bash` | no | Run a shell command with a timeout and exit code |
@@ -371,9 +386,9 @@ for await (const event of agent.run("summarize this project")) {
 ```
 
 `Agent.run()` yields normalized events: `turn_start`, `text`, `reasoning`,
-`tool_start`, `tool_end`, `usage`, `compaction`, `notice`, `error`, `done`.
-Providers only need to implement `Provider.stream(request)` and yield
-`ProviderEvent`s.
+`tool_start`, `tool_end`, `file_change`, `usage`, `compaction`, `notice`,
+`error`, `done`. Providers only need to implement `Provider.stream(request)` and
+yield `ProviderEvent`s.
 
 ## Architecture
 
@@ -394,7 +409,7 @@ src/
     anthropic.ts      Anthropic Messages provider
     openai.ts         OpenAI Chat Completions provider (also AnyRoute/Ollama)
     mock.ts           deterministic provider for tests
-  tools/              read, write, edit, bash, glob, grep
+  tools/              read, write, edit, bash, glob, grep, websearch
   ui/
     tui.ts            full-screen runtime: alt screen, keys, streaming, approvals
     screen.ts         pure frame layout, composer, cursor composition

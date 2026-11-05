@@ -75,6 +75,13 @@ export const editTool: Tool = {
     }
 
     await fs.writeFile(target, after, "utf8");
+    ctx.onFileChange?.({
+      kind: "update",
+      path: relative,
+      diff: diff.text,
+      added: diff.added,
+      removed: diff.removed,
+    });
     return `Updated ${relative} (+${diff.added} -${diff.removed}, ${occurrences} ${
       occurrences === 1 ? "replacement" : "replacements"
     })`;

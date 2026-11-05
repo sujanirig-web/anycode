@@ -1,4 +1,4 @@
-import type { PermissionRequest } from "../tools/types.js";
+import type { FileChange, PermissionRequest } from "../tools/types.js";
 import { addUsage, EMPTY_USAGE, type ToolCall, type Usage } from "../types.js";
 import { color } from "../util/ansi.js";
 import { formatNumber, oneLine } from "../util/text.js";
@@ -83,6 +83,30 @@ function paintDiff(line: string): string {
   return color.dim(line);
 }
 
+const CHANGE_PREFIX = `${color.cyan("✎")} `;
+
+/** One-line summary of a filesystem change. */
+export function describeFileChange(change: FileChange): string {
+  switch (change.kind) {
+    case "create":
+    case "update": {
+      const stat =
+        change.added !== undefined || change.removed !== undefined
+          ? ` (+${change.added ?? 0} -${change.removed ?? 0})`
+          : "";
+      return `${change.kind} ${change.path}${stat}`;
+    }
+    case "copy":
+      return `copy ${change.from ?? change.path} → ${change.to ?? change.path}`;
+    case "move":
+      return `move ${change.from ?? change.path} → ${change.to ?? change.path}`;
+    case "delete":
+      return `delete ${change.path}${change.directory ? " (directory)" : ""}`;
+    case "mkdir":
+      return `create directory ${change.path}`;
+  }
+}
+
 export class Renderer {
   private textOpen = false;
 
@@ -138,6 +162,21 @@ export class Renderer {
     const body = isError ? color.red(summary) : color.gray(summary);
     const timing = durationMs >= 500 ? color.gray(` (${(durationMs / 1000).toFixed(1)}s)`) : "";
     this.out.write(`  ${marker} ${body}${timing}\n`);
+  }
+
+  fileChange(change: FileChange): void {
+    this.endText();
+    this.out.write(`${CHANGE_PREFIX}${color.bold(describeFileChange(change))}\n`);
+    if (!change.diff) return;
+
+    const limit = 40;
+    const lines = change.diff.split(/\r?\n/);
+    for (const line of lines.slice(0, limit)) {
+      this.out.write(`  ${paintDiff(line)}\n`);
+    }
+    if (lines.length > limit) {
+      this.out.write(color.gray(`  … ${lines.length - limit} more lines\n`));
+    }
   }
 
   permission(request: PermissionRequest): void {

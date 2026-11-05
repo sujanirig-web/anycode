@@ -1,6 +1,6 @@
 import { ProviderError, ToolError, errorMessage, isAbortError } from "../errors.js";
 import { builtinTools, findTool } from "../tools/index.js";
-import type { PermissionRequest, Tool } from "../tools/types.js";
+import type { FileChange, PermissionRequest, Tool } from "../tools/types.js";
 import type { Provider, ToolCall, Usage } from "../types.js";
 import { addUsage, EMPTY_USAGE } from "../types.js";
 import { estimateTokens, safeJsonParse, truncateMiddle } from "../util/text.js";
@@ -19,6 +19,7 @@ export type AgentEvent =
       durationMs: number;
     }
   | { type: "usage"; usage: Usage }
+  | { type: "file_change"; change: FileChange }
   | { type: "compaction"; removedMessages: number }
   | { type: "notice"; message: string }
   | { type: "error"; message: string; recoverable: boolean; hint?: string }
@@ -270,11 +271,13 @@ export class Agent {
 
           let content: string;
           let isError = false;
+          const changes: FileChange[] = [];
           try {
             content = await tool.execute(input, {
               cwd: this.options.cwd,
               ...(signal ? { signal } : {}),
               approve: this.approve,
+              onFileChange: (change) => changes.push(change),
             });
           } catch (error) {
             isError = true;
@@ -303,6 +306,12 @@ export class Agent {
             isError,
             durationMs: Date.now() - started,
           };
+
+          // Surface mutations only after the tool result so the UI can attach
+          // the diff to the finished card instead of racing its summary.
+          for (const change of changes) {
+            yield { type: "file_change", change };
+          }
         }
 
         await session.save();

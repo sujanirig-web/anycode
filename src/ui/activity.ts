@@ -1,4 +1,5 @@
 import type { ToolCall } from "../types.js";
+import type { FileChange } from "../tools/types.js";
 import { describeCall, summarizeToolResult } from "./renderer.js";
 import { formatNumber, oneLine } from "../util/text.js";
 import { color } from "../util/ansi.js";
@@ -34,6 +35,8 @@ export interface ActivityCard {
   intent: string;
   status: StepStatus;
   steps: Step[];
+  /** Files touched while this card was active, in the order they changed. */
+  changes?: FileChange[];
   expanded: boolean;
   permission?: ShellApproval;
 }
@@ -233,9 +236,10 @@ export class ActivityTracker {
     const id = `card-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const card: ActivityCard = {
       id,
-      intent,
+      intent: oneLine(intent, 120),
       status: "running",
       steps: [],
+      changes: [],
       expanded: true,
     };
     this.cards.push(card);
@@ -261,6 +265,20 @@ export class ActivityTracker {
     card.steps.push(step);
     card.status = "running";
     return step;
+  }
+
+  /**
+   * Attach a filesystem change to the active box. Changes appear beside the
+   * tool steps that produced them instead of as detached transcript entries.
+   */
+  addChange(change: FileChange): ActivityCard {
+    let card = this.currentCard;
+    if (!card) {
+      card = this.startCard(`Changes to ${change.path}`);
+    }
+    (card.changes ??= []).push(change);
+    card.status = "running";
+    return card;
   }
 
   completeStep(

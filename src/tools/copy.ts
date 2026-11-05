@@ -68,6 +68,13 @@ export const copyTool: Tool = {
     }
 
     const copiedStat = await fs.stat(destination);
+    ctx.onFileChange?.({
+      kind: "copy",
+      path: destRel,
+      from: sourceRel,
+      to: destRel,
+      directory: stat.isDirectory(),
+    });
     return `Copied ${sourceRel} → ${destRel} (${formatBytes(copiedStat.size)})`;
   },
 };

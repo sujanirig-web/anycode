@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ToolError } from "../errors.js";
-import { diffLines } from "../util/diff.js";
+import { diffLines, diffNewFile, type DiffResult } from "../util/diff.js";
 import { formatBytes } from "../util/text.js";
 import { fileExists } from "./read.js";
 import type { Tool } from "./types.js";
@@ -37,9 +37,11 @@ export const writeTool: Tool = {
 
     let preview: string;
     let summary = "";
+    let changeDiff: DiffResult | undefined;
     if (exists) {
       const before = await fs.readFile(target, "utf8");
       const diff = diffLines(before, content);
+      changeDiff = diff;
       preview = diff.text || "(content unchanged)";
       summary = ` (+${diff.added} -${diff.removed})`;
     } else {
@@ -60,6 +62,17 @@ export const writeTool: Tool = {
 
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, content, "utf8");
+
+    const change = exists ? changeDiff : diffNewFile(content);
+    if (change) {
+      ctx.onFileChange?.({
+        kind: exists ? "update" : "create",
+        path: relative,
+        diff: change.text,
+        added: change.added,
+        removed: change.removed,
+      });
+    }
 
     const lines = content.length === 0 ? 0 : content.split("\n").length;
     return `Wrote ${relative} (${formatBytes(Buffer.byteLength(content))}, ${lines} lines)${summary}`;

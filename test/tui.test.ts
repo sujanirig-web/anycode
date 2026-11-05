@@ -176,6 +176,7 @@ describe("activity cards", () => {
       id: "card-1",
       intent: "Editing files",
       status: "ok",
+      changes: [],
       expanded: true,
       steps: [
         { id: "s1", tool: "read", status: "ok", summary: "src/a.ts", durationMs: 20 },
@@ -625,6 +626,7 @@ describe("composeFrame", () => {
       intent: "Running shell command",
       status: "running",
       steps: [{ id: "s1", tool: "bash", status: "running", summary: "ls" }],
+      changes: [],
       expanded: true,
     };
     const transcript = new Transcript();

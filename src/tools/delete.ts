@@ -63,6 +63,7 @@ export const deleteTool: Tool = {
       await fs.rm(target, { recursive: false, force: true });
     }
 
+    ctx.onFileChange?.({ kind: "delete", path: relative, directory: isDir });
     return `Deleted ${relative}`;
   },
 };

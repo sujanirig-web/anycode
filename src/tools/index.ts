@@ -10,6 +10,7 @@ import { deleteTool } from "./delete.js";
 import { copyTool } from "./copy.js";
 import { moveTool } from "./move.js";
 import { mkdirTool } from "./mkdir.js";
+import { websearchTool } from "./websearch.js";
 
 export const builtinTools: Tool[] = [
   readTool,
@@ -23,6 +24,7 @@ export const builtinTools: Tool[] = [
   copyTool,
   moveTool,
   mkdirTool,
+  websearchTool,
 ];
 
 export function findTool(name: string, tools: Tool[] = builtinTools): Tool | undefined {

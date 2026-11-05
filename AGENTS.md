@@ -23,6 +23,9 @@ npm run dev -- "..." # run from source
 - Convert every provider into `ProviderEvent`; never branch on vendor in the agent.
 - Tools throw `ToolError(message, hint)` for recoverable failures so the model can retry.
 - Mutating tools must call `ctx.approve(request)` before touching the filesystem.
+- After a successful mutation, call `ctx.onFileChange(change)` so the TUI can
+  fold the diff into the live coding box and the REPL can print it immediately
+  (include `diff`, `added`, and `removed` for text files).
 - Resolve paths through `resolvePath(cwd, input)`; display through `displayPath`.
 - Keep prose short, errors actionable, and output truncation in place.
 - Do not add runtime dependencies without a strong reason.
@@ -32,7 +35,7 @@ npm run dev -- "..." # run from source
 - `src/main.ts` — CLI modes and REPL wiring
 - `src/agent/` — loop, prompt, sessions, permissions
 - `src/llm/` — providers, HTTP streaming, mock
-- `src/tools/` — read/write/edit/bash/glob/grep
+- `src/tools/` — read/write/edit/bash/glob/grep/websearch
 - `src/ui/` — renderer, REPL, approval prompt
 - `src/util/` — ANSI, diff, glob, SSE, spinner, text
 - `test/` — unit, provider, agent, and CLI end-to-end tests

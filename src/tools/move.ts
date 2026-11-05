@@ -67,6 +67,13 @@ export const moveTool: Tool = {
     await fs.rename(source, destination);
 
     const movedStat = await fs.stat(destination);
+    ctx.onFileChange?.({
+      kind: "move",
+      path: destRel,
+      from: sourceRel,
+      to: destRel,
+      directory: stat.isDirectory(),
+    });
     return `Moved ${sourceRel} → ${destRel} (${formatBytes(movedStat.size)})`;
   },
 };

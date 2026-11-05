@@ -2,6 +2,7 @@ import { color } from "../util/ansi.js";
 import { padToWidth, stringWidth, stripAnsi, truncateWidth } from "../util/width.js";
 import { wrapText } from "../util/wrap.js";
 import type { ActivityCard, Step, StepStatus } from "./activity.js";
+import { describeFileChange } from "./renderer.js";
 
 const TREE_ICONS = {
   running: "⋯",
@@ -38,16 +39,30 @@ const STATUS_BORDER: Record<StepStatus, (s: string) => string> = {
 
 const MAX_DETAIL_LINES = 12;
 const MAX_PERMISSION_LINES = 6;
+const MAX_CHANGE_SUMMARY_LINES = 6;
+const MAX_LIVE_DIFF_LINES = 12;
+const MAX_EXPANDED_DIFF_LINES = 40;
 
 function cardTitle(card: ActivityCard): string {
   const marker = card.expanded ? "▾" : "▸";
   const count = card.steps.length;
   const failed = card.steps.filter((step) => step.status === "error").length;
   const interrupted = card.steps.filter((step) => step.status === "warning").length;
+  const files = card.changes?.length ?? 0;
   const parts = [`${count} step${count === 1 ? "" : "s"}`];
   if (failed > 0) parts.push(`${failed} failed`);
   else if (interrupted > 0) parts.push(`${interrupted} interrupted`);
+  if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
   return `${marker} ${card.intent} · ${parts.join(" · ")}`;
+}
+
+/** Color a single diff line, keeping the box gutter aligned. */
+function diffLine(line: string, width: number): string {
+  const clipped = truncateWidth(line, Math.max(1, width));
+  if (clipped.startsWith("@@")) return color.cyan(clipped);
+  if (clipped.startsWith("+")) return color.green(clipped);
+  if (clipped.startsWith("-")) return color.red(clipped);
+  return color.dim(clipped);
 }
 
 function stepLine(
@@ -76,6 +91,32 @@ function stepLine(
   return line;
 }
 
+/** Truncated, colored diff excerpts for every file changed in the box. */
+function changeDiffLines(card: ActivityCard, contentWidth: number, expand: boolean): string[] {
+  const out: string[] = [];
+  let budget = expand ? MAX_EXPANDED_DIFF_LINES : MAX_LIVE_DIFF_LINES;
+
+  for (const change of card.changes ?? []) {
+    if (!change.diff || budget <= 0) continue;
+    const diffLines = change.diff.split(/\r?\n/);
+    const shown = diffLines.slice(0, budget);
+    for (const line of shown) {
+      out.push(`      ${diffLine(line, Math.max(1, contentWidth - 6))}`);
+    }
+    budget -= shown.length;
+    if (diffLines.length > shown.length) {
+      const remaining = diffLines.length - shown.length;
+      out.push(
+        `      ${color.dim(
+          `… ${remaining} more ${remaining === 1 ? "line" : "lines"}${expand ? "" : " (Ctrl+O to expand)"}`,
+        )}`,
+      );
+    }
+  }
+
+  return out;
+}
+
 /**
  * Render a single activity card as a bordered panel with tree steps.
  * Card width = width param (already computed as terminalWidth - margins).
@@ -87,12 +128,14 @@ export function renderCardPanel(
   width: number,
   selectedStepIndex: number | undefined = undefined,
   nowMs?: number,
+  expandDiffs = false,
 ): string[] {
   // Guard: never render an empty card
-  if (!card.steps || card.steps.length === 0) return [];
+  if (card.steps.length === 0 && (card.changes?.length ?? 0) === 0) return [];
 
   const totalWidth = Math.max(10, width);
   const contentWidth = totalWidth - 2;
+  const changes = card.changes ?? [];
   const statusColor = STATUS_BORDER[card.status];
   const border = statusColor("│");
   const body = (text: string): string => {
@@ -111,6 +154,29 @@ export function renderCardPanel(
   );
 
   if (!card.expanded) {
+    // A finished box keeps a compact list of what changed, then offers the
+    // full diffs through the global expand toggle.
+    if (changes.length > 0) {
+      lines.push(body(""));
+      const shown = changes.slice(0, MAX_CHANGE_SUMMARY_LINES);
+      for (const change of shown) {
+        lines.push(
+          body(
+            ` ${color.cyan("✎")} ${truncateWidth(describeFileChange(change), Math.max(1, contentWidth - 4))}`,
+          ),
+        );
+      }
+      if (changes.length > shown.length) {
+        lines.push(
+          body(`   ${color.dim(`… ${changes.length - shown.length} more files`)}`),
+        );
+      }
+      if (expandDiffs) {
+        for (const line of changeDiffLines(card, contentWidth, true)) lines.push(body(line));
+      } else {
+        lines.push(body(`   ${color.dim("Ctrl+O to show the code · Alt+e to open this box")}`));
+      }
+    }
     lines.push(`${statusColor("└")}${statusColor("─".repeat(contentWidth))}${statusColor("┘")}`);
     return lines;
   }
@@ -135,6 +201,24 @@ export function renderCardPanel(
         );
       }
     }
+  }
+
+  if (changes.length > 0) {
+    lines.push(body(""));
+    const shown = changes.slice(0, MAX_CHANGE_SUMMARY_LINES);
+    for (const change of shown) {
+      lines.push(
+        body(
+          ` ${color.cyan("✎")} ${truncateWidth(describeFileChange(change), Math.max(1, contentWidth - 4))}`,
+        ),
+      );
+    }
+    if (changes.length > shown.length) {
+      lines.push(
+        body(`   ${color.dim(`… ${changes.length - shown.length} more files`)}`),
+      );
+    }
+    for (const line of changeDiffLines(card, contentWidth, expandDiffs)) lines.push(body(line));
   }
 
   if (card.permission) {

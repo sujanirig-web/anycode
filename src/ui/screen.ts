@@ -78,6 +78,8 @@ export interface AgentStatusStripInput {
   frame?: string;
   /** Multi-row working icon; replaces `frame` and the built-in status icon. */
   glyph?: StatusGlyph;
+  /** Files touched in the current turn, shown as a running count. */
+  changedFiles?: number;
 }
 
 export interface Frame {
@@ -325,6 +327,7 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
     totalSteps,
     durationMs,
     relevantShortcuts,
+    changedFiles,
   } = input;
 
   const statusText = statusTextFor(status);
@@ -338,6 +341,10 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
     details.push(`step ${currentStep} · ${totalSteps}`);
   } else if (currentStep !== undefined) {
     details.push(`step ${currentStep}`);
+  }
+
+  if (changedFiles !== undefined && changedFiles > 0) {
+    details.push(`${changedFiles} file${changedFiles === 1 ? "" : "s"} changed`);
   }
 
   if (durationMs !== undefined) {

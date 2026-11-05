@@ -423,6 +423,10 @@ export async function main(argv: string[]): Promise<number> {
           spinner.stop();
           renderer.toolEnd(event.call, event.content, event.isError, event.durationMs);
           break;
+        case "file_change":
+          spinner.stop();
+          renderer.fileChange(event.change);
+          break;
         case "usage":
           break;
         case "compaction":

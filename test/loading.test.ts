@@ -9,7 +9,9 @@ import { describe, it } from "node:test";
 import {
   INFINITY_COLOR_CYCLE_MS,
   INFINITY_ICON_WIDTH,
+  INFINITY_SPIN_MS,
   INFINITY_WIDTH,
+  infinityGlow,
   nodeColorAt,
   renderInfinityIcon,
   renderInfinityMark,
@@ -45,6 +47,51 @@ describe("infinity branding", () => {
 
   it("paints the working icon in the pulse color", () => {
     assert.notEqual(renderInfinityIcon(0).join("\n"), renderInfinityIcon(INFINITY_COLOR_CYCLE_MS / 2).join("\n"));
+  });
+
+  it("keeps the working mark braille-only with a soft moving highlight", () => {
+    const positions = new Set<string>();
+    for (let index = 0; index < 8; index++) {
+      const elapsed = (index / 8) * INFINITY_SPIN_MS;
+      const icon = renderInfinityIcon(elapsed);
+      assert.equal(icon.length, 3);
+      for (const line of icon) assert.equal(stringWidth(line), INFINITY_ICON_WIDTH);
+
+      const text = stripAnsi(icon.join("\n"));
+      assert.match(text, /[\u2801-\u28ff]/);
+      assert.doesNotMatch(text, /●/, "the loader should not draw a bullet over the logo");
+
+      const head = infinityGlow(elapsed)
+        .slice()
+        .sort((a, b) => b.intensity - a.intensity)[0];
+      assert.ok(head, "every frame should have a lit head");
+      positions.add(`${head.row}:${head.column}`);
+    }
+    assert.ok(positions.size >= 4, `the highlight should travel, saw ${positions.size} positions`);
+
+    assert.notEqual(
+      renderInfinityIcon(0).join("\n"),
+      renderInfinityIcon(INFINITY_SPIN_MS / 2).join("\n"),
+      "the highlight should visibly move within one spin",
+    );
+    assert.equal(
+      stripAnsi(renderInfinityIcon(INFINITY_SPIN_MS).join("\n")),
+      stripAnsi(renderInfinityIcon(0).join("\n")),
+      "the spin should loop back to the first frame",
+    );
+  });
+
+  it("fades a soft trail behind the highlight", () => {
+    const glow = infinityGlow(0);
+    assert.ok(glow.length >= 3, "the highlight should cover several cells");
+    assert.ok(
+      glow.some((cell) => cell.intensity > 0.95),
+      "the head should be near full brightness",
+    );
+    assert.ok(
+      glow.some((cell) => cell.intensity > 0.05 && cell.intensity < 0.7),
+      "the tail should fade out gradually",
+    );
   });
 
   it("shifts the working infinity color slowly from purple to red and back", () => {

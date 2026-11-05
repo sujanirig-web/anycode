@@ -125,3 +125,20 @@ export function diffLines(before: string, after: string, context = 3): DiffResul
 export function diffStat(added: number, removed: number): string {
   return `+${added} -${removed}`;
 }
+
+/** Diff for a brand-new file: every line is an addition. */
+export function diffNewFile(content: string): DiffResult {
+  if (content.length === 0) {
+    return { text: "", added: 0, removed: 0, truncated: false };
+  }
+
+  const lines = content.split(/\r?\n/);
+  if (lines[lines.length - 1] === "") lines.pop();
+
+  const shown = lines.slice(0, MAX_OUTPUT_LINES - 1);
+  const truncated = shown.length < lines.length;
+  const out = [`@@ -0,0 +1,${lines.length} @@`, ...shown.map((line) => `+${line}`)];
+  if (truncated) out.push("… diff truncated …");
+
+  return { text: out.join("\n"), added: lines.length, removed: 0, truncated };
+}
