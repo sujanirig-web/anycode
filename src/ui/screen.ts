@@ -373,7 +373,7 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
 function statusTextFor(status: "idle" | "working" | "awaiting_approval" | "error" | "cancelled"): string {
   switch (status) {
     case "working":
-      return "Working";
+      return color.bold("Working");
     case "awaiting_approval":
       return "Waiting for approval";
     case "error":
