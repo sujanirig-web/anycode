@@ -12,9 +12,6 @@ const BRAND_WIDTH = 15;
 const BRAND_HEIGHT = 3;
 const ICON_WIDTH = 13;
 const ICON_HEIGHT = 3;
-/** Bigger working icon for wide terminals, so the loader reads at a glance. */
-export const BIG_ICON_WIDTH = 21;
-const BIG_ICON_HEIGHT = 5;
 const PATH_SAMPLES = 720;
 
 /** Time for the working infinity to drift from purple to red and back again. */
@@ -80,7 +77,6 @@ function buildPath(width: number, height: number): number[][] {
 
 const BRAND_CELLS = buildPath(BRAND_WIDTH, BRAND_HEIGHT);
 const ICON_CELLS = buildPath(ICON_WIDTH, ICON_HEIGHT);
-const BIG_ICON_CELLS = buildPath(BIG_ICON_WIDTH, BIG_ICON_HEIGHT);
 
 interface GlowTrackCell {
   row: number;
@@ -115,7 +111,6 @@ function buildGlowTrack(width: number, height: number): GlowTrackCell[] {
 }
 
 const ICON_GLOW_TRACK = buildGlowTrack(ICON_WIDTH, ICON_HEIGHT);
-const BIG_ICON_GLOW_TRACK = buildGlowTrack(BIG_ICON_WIDTH, BIG_ICON_HEIGHT);
 
 function toLine(rowCells: readonly number[]): string {
   return rowCells
@@ -211,31 +206,6 @@ export function renderInfinityIcon(elapsedMs: number): string[] {
   );
 
   return ICON_CELLS.map((rowCells, row) =>
-    rowCells
-      .map((bits, column) => {
-        if (bits === 0) return " ";
-        const intensity = glow.get(`${row}:${column}`) ?? 0;
-        const tint = mixColor(pulse, NODE_HIGHLIGHT, intensity);
-        return color.bold(rgb(tint.r, tint.g, tint.b)(String.fromCharCode(0x2800 + bits)));
-      })
-      .join(""),
-  );
-}
-
-/**
- * Bigger working infinity icon for wide terminals. Same pulsing color and
- * travelling highlight as the regular icon, but larger so it reads clearly
- * as the working state from across the room.
- */
-export function renderInfinityIconBig(elapsedMs: number): string[] {
-  const pulse = nodeColorAt(elapsedMs);
-  const glow = new Map(
-    infinityGlowForTrack(BIG_ICON_GLOW_TRACK, elapsedMs).map(
-      (cell) => [`${cell.row}:${cell.column}`, cell.intensity] as const,
-    ),
-  );
-
-  return BIG_ICON_CELLS.map((rowCells, row) =>
     rowCells
       .map((bits, column) => {
         if (bits === 0) return " ";
