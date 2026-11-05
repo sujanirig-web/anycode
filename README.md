@@ -36,7 +36,7 @@ anycode v0.2.0 ─────────────────────�
  ┌───────────────────────────────────────────────────────────────┐
  │ › █                                                           │
  └───────────────────────────────────────────────────────────────┘
- enter send · ctrl+j newline · /help · ctrl+d quit · ctrl+o details
+ enter send · ctrl+j newline · /help · esc or ctrl+d quit · ctrl+o details
 ```
 
 ## Features
@@ -254,9 +254,9 @@ Keys:
 | `ctrl+t` | Toggle verbose mode: expand or collapse every activity card |
 | `tab` while working / `ctrl+q` | Open the prompt queue; use `e` to edit or `x`/`delete` to remove a queued prompt |
 | `pageup` / `pagedown` | Scroll the transcript |
-| `ctrl+c` | Copy composer text when nonempty; with an empty composer, interrupt a turn or press twice to exit |
+| `ctrl+c` | Copy composer text when nonempty; with an empty composer, interrupt a turn |
 | `ctrl+v` | Paste system clipboard text at the composer cursor |
-| `ctrl+d` | Quit |
+| `ctrl+d` or `esc` (empty composer) | Quit |
 | `ctrl+l` | Repaint the screen |
 
 While a tool asks for approval, `y` allows once, `a` always for the session, and

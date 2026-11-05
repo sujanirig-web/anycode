@@ -304,6 +304,10 @@ export class Tui {
             this.quit();
             return;
         }
+        if (name === "escape" && this.editor.isEmpty) {
+            this.quit();
+            return;
+        }
         if (ctrl && name === "o") {
             this.expanded = !this.expanded;
             this.paint();
