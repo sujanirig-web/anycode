@@ -2,7 +2,7 @@ import type { Session } from "../agent/session.js";
 import { color } from "../util/ansi.js";
 import { oneLine } from "../util/text.js";
 import { wrapText } from "../util/wrap.js";
-import { describeCall, describeFileChange, summarizeToolResult } from "./renderer.js";
+import { describeCall, describeFileChangeColored, summarizeToolResult } from "./renderer.js";
 import type { ToolCall, Usage } from "../types.js";
 import type { FileChange } from "../tools/types.js";
 import type { ActivityCard } from "./activity.js";
@@ -43,8 +43,8 @@ interface Block {
 const CODE_GUTTER = "  │ ";
 const RESULT_GUTTER = "  ⎿ ";
 const USER_PREFIX = color.green("› ");
-const TOOL_PREFIX = color.gray("⏺ ");
-const RESULT_PREFIX = color.gray("⎿ ");
+const TOOL_PREFIX = color.cyan("⏺ ");
+const RESULT_PREFIX = color.green("⎿ ");
 const CHANGE_PREFIX = color.cyan("✎ ");
 const MAX_COLLAPSED_CHANGE_LINES = 24;
 const MAX_EXPANDED_CHANGE_LINES = 200;
@@ -86,7 +86,9 @@ function renderMarkdown(text: string, width: number): string[] {
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(raw);
     if (heading) {
-      for (const line of wrapText(heading[2] ?? "", width)) out.push(color.bold(line));
+      for (const line of wrapText(heading[2] ?? "", width)) {
+        out.push(color.bold(color.cyan(line)));
+      }
       continue;
     }
 
@@ -280,7 +282,7 @@ export class Transcript {
 
       case "tool": {
         const label = block.name ?? "tool";
-        const header = `${TOOL_PREFIX}${color.gray(label)}`;
+        const header = `${TOOL_PREFIX}${color.cyan(label)}`;
         const args = block.args ?? "";
         if (args.length === 0) return [header];
         return wrapWithHangingIndent(args, width, `${header} `, "  ");
@@ -301,7 +303,7 @@ export class Transcript {
             : "";
         const head = block.isError
           ? `${color.red(RESULT_PREFIX)}${color.red(summary)}`
-          : `${color.gray(RESULT_PREFIX)}${color.gray(summary)}`;
+          : `${RESULT_PREFIX}${color.dim(summary)}`;
 
         if (!expanded) return [`${head}${timing}`];
 
@@ -325,7 +327,7 @@ export class Transcript {
       case "change": {
         const change = block.change;
         if (!change) return [];
-        const out = [`${CHANGE_PREFIX}${color.bold(describeFileChange(change))}`];
+        const out = [`${CHANGE_PREFIX}${describeFileChangeColored(change)}`];
         if (!change.diff) return out;
 
         const diffLines = change.diff.split(/\r?\n/);

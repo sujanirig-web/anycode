@@ -2,7 +2,7 @@ import { color } from "../util/ansi.js";
 import { padToWidth, stringWidth, stripAnsi, truncateWidth } from "../util/width.js";
 import { wrapText } from "../util/wrap.js";
 import type { ActivityCard, Step, StepStatus } from "./activity.js";
-import { describeFileChange } from "./renderer.js";
+import { changeTone, summarizeFileChange } from "./renderer.js";
 
 const TREE_ICONS = {
   running: "⋯",
@@ -24,15 +24,15 @@ function runningGlyph(nowMs: number | undefined): string {
 }
 
 const TREE_COLORS = {
-  running: color.gray,
-  ok: color.gray,
+  running: color.cyan,
+  ok: color.green,
   warning: color.yellow,
   error: color.red,
 };
 
 const STATUS_BORDER: Record<StepStatus, (s: string) => string> = {
-  running: color.gray,
-  ok: color.gray,
+  running: color.cyan,
+  ok: color.green,
   warning: color.yellow,
   error: color.red,
 };
@@ -85,7 +85,7 @@ function stepLine(
   const plainPrefix = `${treePrefix}${glyph} `;
   const available = contentWidth - 2 - stringWidth(plainPrefix) - stringWidth(name) - 2 - stringWidth(timing);
   const summary = truncateWidth(step.summary, Math.max(0, available));
-  let line = `${treePrefix}${icon} ${color.gray(name)}  ${color.dim(summary)}`;
+  let line = `${treePrefix}${icon} ${color.cyan(name)}  ${color.dim(summary)}`;
   if (timing.length > 0) line += color.gray(timing);
   if (selected) line = color.inverse(line);
   return line;
@@ -162,7 +162,7 @@ export function renderCardPanel(
       for (const change of shown) {
         lines.push(
           body(
-            ` ${color.cyan("✎")} ${truncateWidth(describeFileChange(change), Math.max(1, contentWidth - 4))}`,
+            ` ${changeTone(change)("✎")} ${summarizeFileChange(change, contentWidth - 4)}`,
           ),
         );
       }
@@ -209,7 +209,7 @@ export function renderCardPanel(
     for (const change of shown) {
       lines.push(
         body(
-          ` ${color.cyan("✎")} ${truncateWidth(describeFileChange(change), Math.max(1, contentWidth - 4))}`,
+          ` ${changeTone(change)("✎")} ${summarizeFileChange(change, contentWidth - 4)}`,
         ),
       );
     }

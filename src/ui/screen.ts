@@ -338,21 +338,23 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
   // one part of the strip that should never be clipped.
   const details: string[] = [];
   if (currentStep !== undefined && totalSteps !== undefined) {
-    details.push(`step ${currentStep} · ${totalSteps}`);
+    details.push(color.cyan(`step ${currentStep} · ${totalSteps}`));
   } else if (currentStep !== undefined) {
-    details.push(`step ${currentStep}`);
+    details.push(color.cyan(`step ${currentStep}`));
   }
 
   if (changedFiles !== undefined && changedFiles > 0) {
-    details.push(`${changedFiles} file${changedFiles === 1 ? "" : "s"} changed`);
+    details.push(
+      color.green(`${changedFiles} file${changedFiles === 1 ? "" : "s"} changed`),
+    );
   }
 
   if (durationMs !== undefined) {
-    details.push(formatDuration(durationMs));
+    details.push(color.gray(formatDuration(durationMs)));
   }
 
   if (currentIntent) {
-    details.push(truncateWidth(currentIntent, Math.max(0, safeWidth - 20)));
+    details.push(color.dim(truncateWidth(currentIntent, Math.max(0, safeWidth - 20))));
   }
 
   let rightPart = relevantShortcuts ?? "";
@@ -373,30 +375,30 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
 function statusTextFor(status: "idle" | "working" | "awaiting_approval" | "error" | "cancelled"): string {
   switch (status) {
     case "working":
-      return color.bold("Working");
+      return color.cyan(color.bold("Working"));
     case "awaiting_approval":
-      return "Waiting for approval";
+      return color.yellow("Waiting for approval");
     case "error":
-      return "Failed";
+      return color.red("Failed");
     case "cancelled":
-      return "Cancelled";
+      return color.gray("Cancelled");
     default:
-      return "";
+      return color.gray("");
   }
 }
 
 function statusIconFor(status: "idle" | "working" | "awaiting_approval" | "error" | "cancelled"): string {
   switch (status) {
     case "working":
-      return "···";
+      return color.cyan("···");
     case "awaiting_approval":
-      return "⚠";
+      return color.yellow("⚠");
     case "error":
-      return "✗";
+      return color.red("✗");
     case "cancelled":
-      return "Cancelled";
+      return color.gray("Cancelled");
     default:
-      return "";
+      return color.gray("");
   }
 }
 
@@ -653,16 +655,9 @@ export function composeFrame(input: FrameInput): Frame {
     visible[0] = color.dim(label);
     while (visible.length < bodyHeight) visible.push("");
   } else {
-    // Center the conversation vertically within the chat area so the chat
-    // sits in the middle of the screen instead of being pinned to the top.
-    const padTotal = Math.max(0, bodyHeight - visible.length);
-    const padTop = Math.floor(padTotal / 2);
-    const padBottom = padTotal - padTop;
-    visible = [
-      ...Array.from({ length: padTop }, () => ""),
-      ...visible,
-      ...Array.from({ length: padBottom }, () => ""),
-    ];
+    // Following the latest: pad at the top only so new messages always
+    // arrive at the bottom edge of the chat area.
+    while (visible.length < bodyHeight) visible.unshift("");
   }
 
   if (scroll > 0 && visible.length > 0) {

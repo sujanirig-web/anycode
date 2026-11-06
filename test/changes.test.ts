@@ -19,6 +19,7 @@ import { moveTool } from "../src/tools/move.js";
 import type { FileChange, ToolContext } from "../src/tools/types.js";
 import { writeTool } from "../src/tools/write.js";
 import { renderStatusStrip } from "../src/ui/screen.js";
+import { describeFileChangeColored } from "../src/ui/renderer.js";
 import { stripAnsi } from "../src/util/ansi.js";
 import { Transcript } from "../src/ui/transcript.js";
 import { cleanup, tempDir, writeFiles } from "./helpers.js";
@@ -242,6 +243,44 @@ describe("transcript file-change blocks", () => {
 
     const text = transcript.render(80, false).map(stripAnsi).join("\n");
     assert.match(text, /move a\.txt → b\.txt/);
+  });
+});
+
+describe("semantic change coloring", () => {
+  it("tints each change kind like a diff summary", () => {
+    // Basic ANSI foreground codes from util/ansi color helpers.
+    assert.ok(
+      describeFileChangeColored({ kind: "create", path: "a.ts", added: 1, removed: 0 }).startsWith(
+        "\u001b[32m",
+      ),
+      "creates render green",
+    );
+    assert.ok(
+      describeFileChangeColored({ kind: "delete", path: "a.ts" }).startsWith("\u001b[31m"),
+      "deletes render red",
+    );
+    assert.ok(
+      describeFileChangeColored({ kind: "move", path: "b.ts", from: "a.ts", to: "b.ts" }).startsWith(
+        "\u001b[33m",
+      ),
+      "moves render yellow",
+    );
+    assert.ok(
+      describeFileChangeColored({ kind: "mkdir", path: "dir" }).startsWith("\u001b[36m"),
+      "directories render cyan",
+    );
+  });
+
+  it("paints added and removed stats green and red", () => {
+    const painted = describeFileChangeColored({
+      kind: "update",
+      path: "a.ts",
+      added: 3,
+      removed: 2,
+    });
+    assert.match(painted, /\u001b\[32m\+3\u001b\[39m/, "additions are green");
+    assert.match(painted, /\u001b\[31m-2\u001b\[39m/, "removals are red");
+    assert.equal(stripAnsi(painted), "update a.ts (+3 -2)");
   });
 });
 

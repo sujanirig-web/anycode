@@ -2,6 +2,7 @@ import type { FileChange, PermissionRequest } from "../tools/types.js";
 import { addUsage, EMPTY_USAGE, type ToolCall, type Usage } from "../types.js";
 import { color } from "../util/ansi.js";
 import { formatNumber, oneLine } from "../util/text.js";
+import { truncateWidth } from "../util/width.js";
 import { VERSION } from "../version.js";
 
 function stringArg(input: Record<string, unknown>, key: string): string | undefined {
@@ -85,6 +86,43 @@ function paintDiff(line: string): string {
 
 const CHANGE_PREFIX = `${color.cyan("✎")} `;
 
+/**
+ * Semantic tone for a file change, mirroring git diff conventions:
+ * additions are green, deletions red, moves copies yellow, directories cyan.
+ */
+export function changeTone(change: FileChange): (text: string) => string {
+  switch (change.kind) {
+    case "create":
+    case "update":
+      return color.green;
+    case "delete":
+      return color.red;
+    case "move":
+    case "copy":
+      return color.yellow;
+    case "mkdir":
+      return color.cyan;
+  }
+}
+
+/** Paint `(+N -M)` stats green/red like a diff summary. */
+function paintChangeStats(text: string): string {
+  return text
+    .replace(/(\+\d+)/g, (match) => color.green(match))
+    .replace(/(-\d+)/g, (match) => color.red(match));
+}
+
+/** One-line summary of a filesystem change, tinted by its effect. */
+export function describeFileChangeColored(change: FileChange): string {
+  return changeTone(change)(paintChangeStats(describeFileChange(change)));
+}
+
+/** Colored change summary clipped to `width` columns (truncated before painting). */
+export function summarizeFileChange(change: FileChange, width: number): string {
+  const plain = truncateWidth(describeFileChange(change), Math.max(1, width));
+  return changeTone(change)(paintChangeStats(plain));
+}
+
 /** One-line summary of a filesystem change. */
 export function describeFileChange(change: FileChange): string {
   switch (change.kind) {
@@ -152,21 +190,21 @@ export class Renderer {
   toolStart(call: ToolCall, input: Record<string, unknown>): void {
     this.endText();
     const args = oneLine(describeCall(call, input), 140);
-    this.out.write(`${color.gray("⏺")} ${color.gray(call.name)} ${color.gray(args)}\n`);
+    this.out.write(`${color.cyan("⏺")} ${color.cyan(call.name)} ${color.dim(args)}\n`);
   }
 
   toolEnd(call: ToolCall, content: string, isError: boolean, durationMs: number): void {
     this.endText();
     const summary = summarizeToolResult(call.name, content);
-    const marker = isError ? color.red("⎿") : color.gray("⎿");
-    const body = isError ? color.red(summary) : color.gray(summary);
+    const marker = isError ? color.red("⎿") : color.green("⎿");
+    const body = isError ? color.red(summary) : color.dim(summary);
     const timing = durationMs >= 500 ? color.gray(` (${(durationMs / 1000).toFixed(1)}s)`) : "";
     this.out.write(`  ${marker} ${body}${timing}\n`);
   }
 
   fileChange(change: FileChange): void {
     this.endText();
-    this.out.write(`${CHANGE_PREFIX}${color.bold(describeFileChange(change))}\n`);
+    this.out.write(`${CHANGE_PREFIX}${color.bold(describeFileChangeColored(change))}\n`);
     if (!change.diff) return;
 
     const limit = 40;
