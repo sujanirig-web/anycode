@@ -107,14 +107,15 @@ export class OpenAIProvider implements Provider {
     const headers: Record<string, string> = { ...this.extraHeaders };
     if (this.apiKey) headers.authorization = `Bearer ${this.apiKey}`;
 
-    const tools = request.tools.map((tool) => ({
+    const supportsTools = this.id !== "nvidia-nim";
+    const tools = supportsTools ? request.tools.map((tool) => ({
       type: "function",
       function: {
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters,
       },
-    }));
+    })) : [];
 
     const body: Record<string, unknown> = {
       model: request.model,

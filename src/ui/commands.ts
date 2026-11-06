@@ -52,7 +52,7 @@ export const SLASH_HELP = `Commands
 
  Keys
   enter send · ctrl+j newline · ctrl+o expand tool output
-  pageup/pagedown scroll · end jump to latest · ctrl+c interrupt or clear · ctrl+d quit`;
+  pageup/pagedown scroll · end jump to latest · esc quit · ctrl+c interrupt or clear`;
 
 /**
  * Execute a slash command, mutating `state` in place. Returns true when the

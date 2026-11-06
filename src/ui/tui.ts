@@ -705,7 +705,7 @@ export class Tui {
         const models = this.filteredModels();
         const body = [color.dim(`Active: ${this.state.model}`)];
         if (this.pendingModelSwitch) {
-            body.push(color.yellow(`After current turn: ${this.pendingModelSwitch}`));
+            body.push(color.yellow(`Queued: ${this.pendingModelSwitch} (applies after current turn)`));
         }
         if (this.modelPickerFilter)
             body.push(`Search: ${this.modelPickerFilter}`);
@@ -732,16 +732,17 @@ export class Tui {
                 if (!model)
                     continue;
                 const isSelected = i === this.modelPickerSelected;
-                const active = model === this.state.model ? "●" : " ";
-                body.push(`${isSelected ? "›" : " "} ${active} ${model}`);
+                const active = model === this.state.model ? color.green("● active") : color.gray("○");
+                const prefix = isSelected ? "›" : " ";
+                body.push(`${prefix} ${active}  ${color.bold(model)}`);
                 if (isSelected)
                     highlight = body.length - 1;
             }
         }
         return {
-            title: `Models · ${this.state.providerId}`,
+            title: `Models · ${this.state.providerId.toUpperCase()}`,
             body,
-            footer: "↑↓ move · Enter use · Tab switch provider · Esc close",
+            footer: "↑↓ move · Enter use · Tab switch provider · Type to search · Esc close",
             ...(highlight !== undefined ? { highlight } : {}),
         };
     }
@@ -800,15 +801,23 @@ export class Tui {
                 if (!provider)
                     continue;
                 const selected = i === this.providerPickerSelected;
-                const active = provider.id === this.state.providerId ? "●" : " ";
-                body.push(`${selected ? "›" : " "} ${active} ${provider.id.toUpperCase()}`);
+                const active = provider.id === this.state.providerId ? "●" : " ○";
+                const keyStatus = provider.keyEnv
+                    ? process.env[provider.keyEnv]
+                        ? color.green("✓ key")
+                        : color.yellow("○ key")
+                    : color.gray("– key");
+                const label = provider.id.charAt(0).toUpperCase() + provider.id.slice(1).replace(/-/g, " ");
+                const model = provider.model || "—";
+                const prefix = selected ? "›" : " ";
+                body.push(`${prefix} ${active}  ${color.bold(label).padEnd(14)}  ${color.gray(model.padEnd(22))}  ${keyStatus}`);
                 if (selected)
                     highlight = body.length - 1;
             }
         }
         return {
             title: providers.length
-                ? `Connect · ${Math.min(this.providerPickerSelected + 1, providers.length)}/${providers.length}`
+                ? `Connect · ${this.providerPickerSelected + 1}/${providers.length}`
                 : "Connect",
             body,
             footer: "↑↓ move · Enter connect · Shift+A custom · Tab models · Esc close",
@@ -832,7 +841,7 @@ export class Tui {
                     continue;
                 const isSelected = i === this.paletteSelected;
                 const args = cmd.args ? ` ${cmd.args}` : "";
-                body.push(`${isSelected ? "›" : " "} /${cmd.name}${args}  ·  ${cmd.desc}`);
+                body.push(`${isSelected ? "›" : " "}  ${color.cyan("/" + cmd.name)}${color.gray(args)}  ·  ${color.dim(cmd.desc)}`);
                 if (isSelected)
                     highlight = body.length - 1;
             }

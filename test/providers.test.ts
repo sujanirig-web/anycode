@@ -107,19 +107,10 @@ describe("custom provider presets", () => {
 });
 
 describe("NVIDIA NIM function lookup fallback", () => {
-  it("retries chat without tools when NIM reports a missing function", async () => {
+  it("omits tools for NVIDIA NIM so chat works without tool calling", async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     const server = await startServer((_request, response, body) => {
       requestBodies.push(JSON.parse(body) as Record<string, unknown>);
-      if (requestBodies.length === 1) {
-        response.writeHead(404, { "content-type": "application/json" });
-        response.end(JSON.stringify({
-          status: 404,
-          title: "Not Found",
-          detail: "Function 'test-function-id': Not found for account 'test-account'",
-        }));
-        return;
-      }
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end([
         'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
@@ -135,10 +126,9 @@ describe("NVIDIA NIM function lookup fallback", () => {
         apiKey: "test-key",
       });
       const events = await collect(provider.stream(baseRequest()));
-      assert.equal(requestBodies.length, 2);
-      assert.ok(Array.isArray(requestBodies[0]?.tools));
-      assert.equal(requestBodies[1]?.tools, undefined);
-      assert.equal(requestBodies[1]?.tool_choice, undefined);
+      assert.equal(requestBodies.length, 1);
+      assert.equal(requestBodies[0]?.tools, undefined);
+      assert.equal(requestBodies[0]?.tool_choice, undefined);
       assert.equal(textOf(events), "Hello");
     } finally {
       await server.close();
