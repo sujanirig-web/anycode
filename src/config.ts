@@ -49,14 +49,17 @@ export interface ProviderInfo {
 }
 
 export function listProviders(): ProviderInfo[] {
-  return PROVIDER_IDS.map((id) => ({
-    id,
-    model: PROVIDER_DEFAULTS[id]?.model ?? "",
-    baseURL: PROVIDER_DEFAULTS[id]?.baseURL,
-    keyEnv: PROVIDER_DEFAULTS[id]?.keyEnv,
-    contextTokens: PROVIDER_DEFAULTS[id]?.contextTokens,
-    site: PROVIDER_DEFAULTS[id]?.site,
-  }));
+  return PROVIDER_IDS.map((id) => {
+    const defaults = PROVIDER_DEFAULTS[id];
+    return {
+      id,
+      model: defaults?.model ?? "",
+      baseURL: defaults?.baseURL,
+      keyEnv: defaults?.keyEnv,
+      contextTokens: defaults?.contextTokens,
+      site: defaults?.site,
+    };
+  });
 }
 
 export function configPaths(cwd: string): { global: string; project: string } {
@@ -175,10 +178,6 @@ export function defaultModelFor(provider: string): string {
   return PROVIDER_DEFAULTS[provider]?.model ?? "";
 }
 
-export function apiKeyEnvFor(provider: string): string | undefined {
-  return PROVIDER_DEFAULTS[provider]?.keyEnv;
-}
-
 export function defaultBaseURLFor(provider: string): string | undefined {
   if (provider === "anthropic") return "https://api.anthropic.com/v1";
   if (provider === "openai") return "https://api.openai.com/v1";
@@ -220,10 +219,11 @@ export async function listConfiguredProviders(cwd: string): Promise<ProviderInfo
 
   return ids.map((id) => {
     const defaults = resolveProviderDefaults(id, global, project);
+    const baseURL = defaults.baseURL ?? defaultBaseURLFor(id);
     return {
       id,
       model: defaults.model ?? "",
-      ...((defaults.baseURL ?? defaultBaseURLFor(id)) ? { baseURL: defaults.baseURL ?? defaultBaseURLFor(id) } : {}),
+      ...(baseURL ? { baseURL } : {}),
       ...(defaults.keyEnv ? { keyEnv: defaults.keyEnv } : {}),
       ...(defaults.contextTokens ? { contextTokens: defaults.contextTokens } : {}),
       ...(defaults.site ? { site: defaults.site } : {}),

@@ -47,12 +47,3 @@ export class PermissionBroker {
     return answer === "yes";
   }
 }
-
-/** Non-interactive gate: denies everything unless autoApprove is set. */
-export function nonInteractiveGate(autoApprove: boolean, allowed = new Set<string>()) {
-  return createPermissionGate({
-    autoApprove,
-    allowed,
-    ask: async () => "no",
-  });
-}

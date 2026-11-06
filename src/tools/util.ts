@@ -1,7 +1,8 @@
+import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ToolError } from "../errors.js";
-import { formatBytes, truncateMiddle } from "../util/text.js";
+import { formatBytes, looksBinary, truncateMiddle } from "../util/text.js";
 
 export function requireString(
   input: Record<string, unknown>,
@@ -59,11 +60,7 @@ export function displayPath(cwd: string, absolute: string): string {
 }
 
 export function detectBinary(buffer: Uint8Array): boolean {
-  const limit = Math.min(buffer.length, 8192);
-  for (let i = 0; i < limit; i++) {
-    if (buffer[i] === 0) return true;
-  }
-  return false;
+  return looksBinary(buffer);
 }
 
 export function limitOutput(text: string, max = 30_000): string {
@@ -72,7 +69,6 @@ export function limitOutput(text: string, max = 30_000): string {
 }
 
 export async function readTextFile(absolute: string): Promise<string> {
-  const { promises: fs } = await import("node:fs");
   let stat;
   try {
     stat = await fs.stat(absolute);

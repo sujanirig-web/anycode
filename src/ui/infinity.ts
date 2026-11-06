@@ -199,17 +199,21 @@ export function renderInfinityMark(): string[] {
  */
 export function renderInfinityIcon(elapsedMs: number): string[] {
   const pulse = nodeColorAt(elapsedMs);
-  const glow = new Map(
-    infinityGlow(elapsedMs).map(
-      (cell) => [`${cell.row}:${cell.column}`, cell.intensity] as const,
-    ),
+  // Index glow intensity by grid position instead of allocating a string-keyed
+  // map on every animation frame.
+  const intensityGrid: number[][] = ICON_CELLS.map((rowCells) =>
+    new Array<number>(rowCells.length).fill(0),
   );
+  for (const cell of infinityGlow(elapsedMs)) {
+    const row = intensityGrid[cell.row];
+    if (row) row[cell.column] = cell.intensity;
+  }
 
   return ICON_CELLS.map((rowCells, row) =>
     rowCells
       .map((bits, column) => {
         if (bits === 0) return " ";
-        const intensity = glow.get(`${row}:${column}`) ?? 0;
+        const intensity = intensityGrid[row]?.[column] ?? 0;
         const tint = mixColor(pulse, NODE_HIGHLIGHT, intensity);
         return color.bold(rgb(tint.r, tint.g, tint.b)(String.fromCharCode(0x2800 + bits)));
       })

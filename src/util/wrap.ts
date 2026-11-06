@@ -1,4 +1,4 @@
-import { stringWidth } from "./width.js";
+import { codePointCells, stringWidth } from "./width.js";
 
 export interface WrapOptions {
   /** Keep leading whitespace (code blocks) instead of trimming continuations. */
@@ -10,7 +10,7 @@ function sliceToWidth(text: string, width: number): { head: string; rest: string
   let used = 0;
   let index = 0;
   for (const char of text) {
-    const next = stringWidth(char);
+    const next = codePointCells(char);
     if (used + next > width) break;
     head += char;
     used += next;
@@ -21,7 +21,9 @@ function sliceToWidth(text: string, width: number): { head: string; rest: string
 
 function lastSpaceIndex(text: string): number {
   for (let index = text.length - 1; index >= 0; index--) {
-    if (/\s/.test(text[index] ?? "")) return index;
+    const code = text.charCodeAt(index);
+    // Fast whitespace test: space, tab, newline, carriage return, form feed.
+    if (code === 32 || code === 9 || code === 10 || code === 13 || code === 12) return index;
   }
   return -1;
 }

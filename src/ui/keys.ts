@@ -19,6 +19,11 @@ export interface TextInput {
 export type KeyEvent = KeyPress | MouseEvent | TextInput;
 
 const PRINTABLE = /^[A-Za-z0-9]$/;
+// Non-global regexes are safe to reuse across calls; hoisting avoids allocating
+// a new matcher on every parser iteration.
+const MOUSE_SEQUENCE = /^\u001b\[<[0-9;]*[Mm]/;
+const CSI_SEQUENCE = /^\u001b\[([0-9;?]*)([@-~])/;
+const SS3_SEQUENCE = /^\u001bO([A-Za-z])/;
 
 function controlLetter(code: number): string | undefined {
   if (code < 1 || code > 26) return undefined;
@@ -189,13 +194,13 @@ export class KeyParser {
       if (buffer[1] === "[") {
         // Mouse protocol (SGR mode ?1006h): \e[<{button};{x};{y}[Mm]
         // Consume and ignore mouse events so only the keyboard scrolls.
-        const mouseMatch = /^\u001b\[<[0-9;]*[Mm]/.exec(buffer);
+        const mouseMatch = MOUSE_SEQUENCE.exec(buffer);
         if (mouseMatch) {
           buffer = buffer.slice(mouseMatch[0].length);
           events.push({ type: "mouse" });
           continue;
         }
-        const match = /^\u001b\[([0-9;?]*)([@-~])/.exec(buffer);
+        const match = CSI_SEQUENCE.exec(buffer);
         if (!match) {
           if (!final) break;
           events.push({ type: "key", name: "escape" });
@@ -209,7 +214,7 @@ export class KeyParser {
       }
 
       if (buffer[1] === "O") {
-        const match = /^\u001bO([A-Za-z])/.exec(buffer);
+        const match = SS3_SEQUENCE.exec(buffer);
         if (!match) {
           if (!final) break;
           events.push({ type: "key", name: "escape" });

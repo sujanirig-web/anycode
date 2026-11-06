@@ -88,7 +88,7 @@ export class Session {
     if (!this.title) this.title = oneLine(userText, 70);
   }
 
-  toJSON(): SessionInit & { messageCount: number } {
+  private identity(): Omit<SessionMeta, "messageCount"> & { messageCount: number } {
     return {
       id: this.id,
       createdAt: this.createdAt,
@@ -97,23 +97,20 @@ export class Session {
       provider: this.provider,
       model: this.model,
       title: this.title,
-      messages: this.messages,
-      usage: this.usage,
       messageCount: this.messages.length,
     };
   }
 
-  meta(): SessionMeta {
+  toJSON(): SessionInit & { messageCount: number } {
     return {
-      id: this.id,
-      createdAt: this.createdAt,
-      updatedAt: this.updatedAt,
-      cwd: this.cwd,
-      provider: this.provider,
-      model: this.model,
-      title: this.title,
-      messageCount: this.messages.length,
+      ...this.identity(),
+      messages: this.messages,
+      usage: this.usage,
     };
+  }
+
+  meta(): SessionMeta {
+    return this.identity();
   }
 
   async save(): Promise<string> {
@@ -135,27 +132,31 @@ export async function listSessions(cwd: string, limit = 30): Promise<SessionMeta
     return [];
   }
 
-  const metas: SessionMeta[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    try {
-      const raw = await fs.readFile(path.join(dir, entry), "utf8");
-      const data = JSON.parse(raw) as Partial<SessionMeta> & { messages?: Message[] };
-      if (!data.id) continue;
-      metas.push({
-        id: data.id,
-        createdAt: data.createdAt ?? "",
-        updatedAt: data.updatedAt ?? data.createdAt ?? "",
-        cwd: data.cwd ?? cwd,
-        provider: data.provider ?? "",
-        model: data.model ?? "",
-        title: data.title ?? "(untitled)",
-        messageCount: data.messages?.length ?? data.messageCount ?? 0,
-      });
-    } catch {
-      // ignore malformed session files
-    }
-  }
+  const files = entries.filter((entry) => entry.endsWith(".json"));
+  const metas = (
+    await Promise.all(
+      files.map(async (entry): Promise<SessionMeta | undefined> => {
+        try {
+          const raw = await fs.readFile(path.join(dir, entry), "utf8");
+          const data = JSON.parse(raw) as Partial<SessionMeta> & { messages?: Message[] };
+          if (!data.id) return undefined;
+          return {
+            id: data.id,
+            createdAt: data.createdAt ?? "",
+            updatedAt: data.updatedAt ?? data.createdAt ?? "",
+            cwd: data.cwd ?? cwd,
+            provider: data.provider ?? "",
+            model: data.model ?? "",
+            title: data.title ?? "(untitled)",
+            messageCount: data.messages?.length ?? data.messageCount ?? 0,
+          };
+        } catch {
+          // ignore malformed session files
+          return undefined;
+        }
+      }),
+    )
+  ).filter((meta): meta is SessionMeta => meta !== undefined);
 
   metas.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return metas.slice(0, limit);

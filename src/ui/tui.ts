@@ -1605,10 +1605,13 @@ export class Tui {
         // Down/PageUp/PageDown, auto-follow pauses until they jump to latest.
         const newMax = Math.max(0, lines.length - frame.bodyHeight);
         if (this.busy && !this.userScrolled) {
-            this.scroll = newMax;
             this.scrollTarget = newMax;
-            frame = this.compose(width, height, lines);
-        } else if (this.scroll > newMax) {
+            if (this.scroll !== newMax) {
+                this.scroll = newMax;
+                frame = this.compose(width, height, lines);
+            }
+        }
+        else if (this.scroll > newMax) {
             // user scrolled up; snap to the new max but don't force to 0
             this.scroll = newMax;
             frame = this.compose(width, height, lines);

@@ -1,13 +1,23 @@
 import { UserError } from "../errors.js";
 import type { Provider } from "../types.js";
 import { AnthropicProvider } from "./anthropic.js";
-import { OpenAIProvider } from "./openai.js";
+import { OpenAIProvider, type OpenAIProviderOptions } from "./openai.js";
 
 export interface ProviderSettings {
   id: string;
   model: string;
   apiKey?: string;
   baseURL?: string;
+}
+
+function openAIProvider(
+  settings: ProviderSettings,
+  options: Omit<OpenAIProviderOptions, "apiKey">,
+): Provider {
+  return new OpenAIProvider({
+    ...options,
+    ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+  });
 }
 
 export function createProvider(settings: ProviderSettings): Provider {
@@ -19,45 +29,40 @@ export function createProvider(settings: ProviderSettings): Provider {
       });
 
     case "openai":
-      return new OpenAIProvider({
-        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
+      return openAIProvider(settings, {
         ...(settings.baseURL ? { baseURL: settings.baseURL } : {}),
       });
 
     case "openai-compatible":
     case "compatible":
-      return new OpenAIProvider({
+      return openAIProvider(settings, {
         id: "openai-compatible",
         label: "OpenAI-compatible",
         baseURL: settings.baseURL ?? "https://api.openai.com/v1",
-        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
       });
 
     case "ollama":
-      return new OpenAIProvider({
+      return openAIProvider(settings, {
         id: "ollama",
         label: "Ollama",
         baseURL: settings.baseURL ?? "http://localhost:11434/v1",
         requiresApiKey: false,
-        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
       });
 
     case "anyroute":
-      return new OpenAIProvider({
+      return openAIProvider(settings, {
         id: "anyroute",
         label: "AnyRoute",
         baseURL: settings.baseURL ?? "http://127.0.0.1:3456/v1",
         requiresApiKey: false,
-        ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
       });
 
     default:
       if (settings.baseURL) {
-        return new OpenAIProvider({
+        return openAIProvider(settings, {
           id: settings.id,
           label: settings.id,
           baseURL: settings.baseURL,
-          ...(settings.apiKey ? { apiKey: settings.apiKey } : {}),
         });
       }
       throw new UserError(

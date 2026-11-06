@@ -1,5 +1,5 @@
 import { chromeBackground, color, composerBackground, panelBackground, stripAnsi } from "../util/ansi.js";
-import { padToWidth, stringWidth, truncateWidth } from "../util/width.js";
+import { codePointCells, padToWidth, stringWidth, truncateWidth } from "../util/width.js";
 import { INFINITY_WIDTH, renderInfinityMark } from "./infinity.js";
 
 export interface ApprovalView {
@@ -210,7 +210,7 @@ function layoutComposerText(text: string, width: number, cursor: number): Compos
       continue;
     }
 
-    const charWidth = stringWidth(char);
+    const charWidth = codePointCells(char);
     if (column > 0 && column + charWidth > width) {
       rows.push("");
       row++;
@@ -275,15 +275,6 @@ export function headerLine(header: string, width: number): string {
   return color.bold(color.magenta(truncateWidth(header, width - 2)));
 }
 
-/** Side-by-side layout for status line. */
-export function sideBySide(left: string, right: string, width: number): string {
-  const rightText = truncateWidth(right, Math.max(0, width - 10));
-  const available = Math.max(0, width - stringWidth(rightText) - 2);
-  const leftText = truncateWidth(left, available);
-  const gap = Math.max(1, width - stringWidth(leftText) - stringWidth(rightText) - 2);
-  return ` ${leftText}${" ".repeat(gap)}${rightText} `;
-}
-
 /**
  * Render the agent status strip.
  * Format: <icon> <status label> · <current intent or step> · <duration>
@@ -333,6 +324,7 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
   const statusText = statusTextFor(status);
   const icon = status === "working" && input.frame ? input.frame : statusIconFor(status);
   const heading = showIcon ? `${icon} ${statusText}` : statusText;
+  const headingWidth = stringWidth(heading);
 
   // Keep the icon out of truncation: it may carry ANSI color, and it is the
   // one part of the strip that should never be clipped.
@@ -358,10 +350,10 @@ function buildStatusLine(input: AgentStatusStripInput, width: number, showIcon =
   }
 
   let rightPart = relevantShortcuts ?? "";
-  rightPart = truncateWidth(rightPart, Math.max(0, safeWidth - stringWidth(heading) - 4));
+  rightPart = truncateWidth(rightPart, Math.max(0, safeWidth - headingWidth - 4));
 
   const rightWidth = stringWidth(rightPart);
-  const detailsBudget = Math.max(0, safeWidth - stringWidth(heading) - rightWidth - 4);
+  const detailsBudget = Math.max(0, safeWidth - headingWidth - rightWidth - 4);
   const detailText = details.length > 0 ? ` · ${details.join(" · ")}` : "";
   const leftPart = `${heading}${truncateWidth(detailText, detailsBudget)}`;
 
@@ -412,27 +404,28 @@ function formatDuration(ms: number): string {
   return `${seconds}s`;
 }
 
+/** Composer rows plus the layout metadata needed to place the real cursor. */
+interface ComposerRender {
+  lines: string[];
+  layout: ComposerTextLayout;
+  viewport: { start: number; end: number };
+}
+
 /**
- * Render the Cavehound bottom composer with left accent rail and right-aligned context.
- * The composer contains only:
- *   - Input row with the "▌" rail and placeholder/text
- *   - Optional second input line for multiline text
- *   - Usage row (right-aligned)
- *   - Model row (left-aligned)
- *   - Bottom padding row
- *
- * The "attach · commands · run" hint is rendered outside the interface on the
- * bottom edge, below the composer gap, so it never shares the input rail.
+ * Build the Cavehound bottom composer with its left accent rail and
+ * right-aligned context, returning the wrapped-text layout as well so
+ * `composeFrame` does not have to re-wrap the draft.
  */
-export function renderCavehoundComposer(
+
+function renderComposer(
   composer: { text: string; cursor: number },
   width: number,
   agentName: string | undefined,
   agentMode: "idle" | "running" | "shell" | "plan" | "file-picker",
-  usage?: { inputTokens: number; outputTokens: number },
-  model?: ModelInfo,
-  maxInputRows = 6,
-): string[] {
+  usage: { inputTokens: number; outputTokens: number } | undefined,
+  model: ModelInfo | undefined,
+  maxInputRows: number,
+): ComposerRender {
   const margin = 2;
   const innerWidth = Math.max(1, width - margin * 2);
   const rail = color.gray("▌");
@@ -480,7 +473,28 @@ export function renderCavehoundComposer(
   // without creating an oversized dark/normal split.
   lines.push("");
 
-  return lines;
+  return { lines, layout, viewport };
+}
+
+/** Render just the composer lines. */
+export function renderCavehoundComposer(
+  composer: { text: string; cursor: number },
+  width: number,
+  agentName: string | undefined,
+  agentMode: "idle" | "running" | "shell" | "plan" | "file-picker",
+  usage?: { inputTokens: number; outputTokens: number },
+  model?: ModelInfo,
+  maxInputRows = 6,
+): string[] {
+  return renderComposer(
+    composer,
+    width,
+    agentName,
+    agentMode,
+    usage,
+    model,
+    maxInputRows,
+  ).lines;
 }
 
 /** Blank rows kept below the composer; the composer's padding replaces the gap. */
@@ -608,14 +622,7 @@ export function composeFrame(input: FrameInput): Frame {
     1,
     height - headerRows - 1 - statusBlockRows - queueBlockRows - footerRows - composerFixedRows - 1,
   );
-  const composerText = derivePlaceholder(input.composer, input.agentName, input.agentMode);
-  const composerLayout = layoutComposerText(
-    composerText,
-    Math.max(1, width - 7),
-    input.composer.text.length > 0 ? input.composer.cursor : 0,
-  );
-  const composerViewportRange = composerViewport(composerLayout, maxInputRows);
-  const composerLines = renderCavehoundComposer(
+  const composerRender = renderComposer(
     input.composer,
     width,
     input.agentName,
@@ -624,6 +631,9 @@ export function composeFrame(input: FrameInput): Frame {
     input.model,
     maxInputRows,
   );
+  const composerLines = composerRender.lines;
+  const composerLayout = composerRender.layout;
+  const composerViewportRange = composerRender.viewport;
 
   // Reserve fixed chrome first, then spend whatever is left on the transcript
   // and the bottom gap. Shrinking the gap keeps small terminals usable.
@@ -658,11 +668,6 @@ export function composeFrame(input: FrameInput): Frame {
     // Following the latest: pad at the top only so new messages always
     // arrive at the bottom edge of the chat area.
     while (visible.length < bodyHeight) visible.unshift("");
-  }
-
-  if (scroll > 0 && visible.length > 0) {
-    const label = ` ↓ ${scroll} line${scroll === 1 ? "" : "s"} below · [End] jump to latest `;
-    visible[0] = color.dim(label);
   }
 
   if (input.showBrand && total === 0 && scroll === 0) {

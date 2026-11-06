@@ -1,7 +1,7 @@
 import { ProviderError, ToolError, errorMessage, isAbortError } from "../errors.js";
-import { builtinTools, findTool } from "../tools/index.js";
+import { builtinTools } from "../tools/index.js";
 import type { FileChange, PermissionRequest, Tool } from "../tools/types.js";
-import type { Provider, ToolCall, Usage } from "../types.js";
+import type { Message, Provider, ToolCall, ToolSchema, Usage } from "../types.js";
 import { addUsage, EMPTY_USAGE } from "../types.js";
 import { estimateTokens, safeJsonParse, truncateMiddle } from "../util/text.js";
 import type { Session } from "./session.js";
@@ -45,6 +45,9 @@ const MAX_TOOL_OUTPUT = 60_000;
 
 export class Agent {
   private readonly tools: Tool[];
+  private readonly toolMap: Map<string, Tool>;
+  private readonly toolSpecs: ToolSchema[];
+  private readonly toolNames: string;
   private readonly maxSteps: number;
   private readonly maxTokens: number;
   private readonly temperature: number | undefined;
@@ -54,12 +57,35 @@ export class Agent {
 
   constructor(private readonly options: AgentOptions) {
     this.tools = options.tools ?? builtinTools;
+    this.toolMap = new Map();
+    // Preserve first-match semantics if a caller supplies duplicate names.
+    for (const tool of this.tools) {
+      if (!this.toolMap.has(tool.name)) this.toolMap.set(tool.name, tool);
+    }
+    // Tool definitions are immutable for the agent's lifetime, so build the
+    // provider-facing schemas once instead of on every step.
+    this.toolSpecs = this.tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    }));
+    this.toolNames = this.tools.map((tool) => tool.name).join(", ");
     this.maxSteps = options.maxSteps ?? 50;
     this.maxTokens = options.maxTokens ?? 8192;
     this.temperature = options.temperature;
     this.contextTokens = options.contextTokens ?? 200_000;
     this.toolChoice = options.toolChoice ?? "auto";
     this.approve = options.approve;
+  }
+
+  /** Characters a message contributes to the context budget. */
+  private static messageChars(message: Message): number {
+    if (message.role !== "assistant") return message.content.length;
+    const toolChars = (message.toolCalls ?? []).reduce(
+      (sum, call) => sum + call.arguments.length,
+      0,
+    );
+    return message.content.length + toolChars;
   }
 
   /** Detect a tool-calling loop: same tool+args repeated 3+ times in a row. */
@@ -122,11 +148,7 @@ export class Agent {
             model: this.options.model,
             system: this.options.system,
             messages: session.messages,
-            tools: this.tools.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.parameters,
-            })),
+            tools: this.toolSpecs,
             maxTokens: this.maxTokens,
             ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
             ...(signal ? { signal } : {}),
@@ -196,6 +218,9 @@ export class Agent {
 
         if (toolCalls.length === 0) break;
 
+        // The loop guard only depends on calls seen before this batch.
+        const loopDetected = this.isToolLoop(recentToolCalls);
+
         for (const call of toolCalls) {
           if (signal?.aborted) {
             aborted = true;
@@ -203,7 +228,7 @@ export class Agent {
           }
 
           // Break tool-calling loops: same tool+args repeated 3+ times in a row.
-          if (this.isToolLoop(recentToolCalls)) {
+          if (loopDetected) {
             const content = `Stopped: detected a tool-calling loop (${call.name} repeated). Respond to the user directly instead of calling tools again.`;
             session.messages.push({
               role: "tool",
@@ -223,12 +248,10 @@ export class Agent {
           }
 
           const started = Date.now();
-          const tool = findTool(call.name, this.tools);
+          const tool = this.toolMap.get(call.name);
 
           if (!tool) {
-            const content = `Unknown tool "${call.name}". Available tools: ${this.tools
-              .map((candidate) => candidate.name)
-              .join(", ")}.`;
+            const content = `Unknown tool "${call.name}". Available tools: ${this.toolNames}.`;
             session.messages.push({
               role: "tool",
               toolCallId: call.id,
@@ -344,27 +367,22 @@ export class Agent {
    */
   private trimHistory(): number {
     const budgetChars = this.contextTokens * 4 * 0.6;
-    const size = () =>
-      this.options.session.messages.reduce((total, message) => {
-        const toolChars =
-          message.role === "assistant"
-            ? (message.toolCalls ?? []).reduce((sum, call) => sum + call.arguments.length, 0)
-            : 0;
-        return total + message.content.length + toolChars;
-      }, 0);
+    const messages = this.options.session.messages;
+    let current = messages.reduce((total, message) => total + Agent.messageChars(message), 0);
 
     let removed = 0;
-    let current = size();
 
-    while (current > budgetChars && this.options.session.messages.length > 6) {
-      const nextUser = this.options.session.messages.findIndex(
+    while (current > budgetChars && messages.length > 6) {
+      const nextUser = messages.findIndex(
         (message, index) => index > 0 && message.role === "user",
       );
       if (nextUser <= 0) break;
 
-      this.options.session.messages.splice(0, nextUser);
+      for (let index = 0; index < nextUser; index++) {
+        current -= Agent.messageChars(messages[index]!);
+      }
+      messages.splice(0, nextUser);
       removed += nextUser;
-      current = size();
     }
 
     return removed;

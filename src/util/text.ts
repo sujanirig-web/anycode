@@ -33,10 +33,6 @@ export function oneLine(text: string, max = 120): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return count === 1 ? singular : plural;
-}
-
 export function estimateTokens(text: string): number {
   // Cheap heuristic: ~4 chars per token for latin text. Good enough for budgets.
   return Math.ceil(text.length / 4);
@@ -54,12 +50,6 @@ export function safeJsonParse<T = unknown>(text: string): JsonParseResult<T> {
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-}
-
-export function relativeTo(cwd: string, target: string): string {
-  if (!target.startsWith(cwd)) return target;
-  const rest = target.slice(cwd.length).replace(/^[\\/]+/, "");
-  return rest.length === 0 ? "." : rest;
 }
 
 /** True when a buffer looks binary (NUL byte in the first 8 KiB). */

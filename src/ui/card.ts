@@ -2,6 +2,7 @@ import { color } from "../util/ansi.js";
 import { padToWidth, stringWidth, stripAnsi, truncateWidth } from "../util/width.js";
 import { wrapText } from "../util/wrap.js";
 import type { ActivityCard, Step, StepStatus } from "./activity.js";
+import type { FileChange } from "../tools/types.js";
 import { changeTone, summarizeFileChange } from "./renderer.js";
 
 const TREE_ICONS = {
@@ -46,14 +47,34 @@ const MAX_EXPANDED_DIFF_LINES = 40;
 function cardTitle(card: ActivityCard): string {
   const marker = card.expanded ? "▾" : "▸";
   const count = card.steps.length;
-  const failed = card.steps.filter((step) => step.status === "error").length;
-  const interrupted = card.steps.filter((step) => step.status === "warning").length;
+  let failed = 0;
+  let interrupted = 0;
+  for (const step of card.steps) {
+    if (step.status === "error") failed++;
+    else if (step.status === "warning") interrupted++;
+  }
   const files = card.changes?.length ?? 0;
   const parts = [`${count} step${count === 1 ? "" : "s"}`];
   if (failed > 0) parts.push(`${failed} failed`);
   else if (interrupted > 0) parts.push(`${interrupted} interrupted`);
   if (files > 0) parts.push(`${files} file${files === 1 ? "" : "s"}`);
   return `${marker} ${card.intent} · ${parts.join(" · ")}`;
+}
+
+/** Compact list of files changed while the card was active. */
+function changeSummaryLines(changes: FileChange[], contentWidth: number): string[] {
+  if (changes.length === 0) return [];
+  const lines = [""];
+  const shown = changes.slice(0, MAX_CHANGE_SUMMARY_LINES);
+  for (const change of shown) {
+    lines.push(
+      ` ${changeTone(change)("✎")} ${summarizeFileChange(change, contentWidth - 4)}`,
+    );
+  }
+  if (changes.length > shown.length) {
+    lines.push(`   ${color.dim(`… ${changes.length - shown.length} more files`)}`);
+  }
+  return lines;
 }
 
 /** Color a single diff line, keeping the box gutter aligned. */
@@ -157,20 +178,7 @@ export function renderCardPanel(
     // A finished box keeps a compact list of what changed, then offers the
     // full diffs through the global expand toggle.
     if (changes.length > 0) {
-      lines.push(body(""));
-      const shown = changes.slice(0, MAX_CHANGE_SUMMARY_LINES);
-      for (const change of shown) {
-        lines.push(
-          body(
-            ` ${changeTone(change)("✎")} ${summarizeFileChange(change, contentWidth - 4)}`,
-          ),
-        );
-      }
-      if (changes.length > shown.length) {
-        lines.push(
-          body(`   ${color.dim(`… ${changes.length - shown.length} more files`)}`),
-        );
-      }
+      for (const line of changeSummaryLines(changes, contentWidth)) lines.push(body(line));
       if (expandDiffs) {
         for (const line of changeDiffLines(card, contentWidth, true)) lines.push(body(line));
       } else {
@@ -204,20 +212,7 @@ export function renderCardPanel(
   }
 
   if (changes.length > 0) {
-    lines.push(body(""));
-    const shown = changes.slice(0, MAX_CHANGE_SUMMARY_LINES);
-    for (const change of shown) {
-      lines.push(
-        body(
-          ` ${changeTone(change)("✎")} ${summarizeFileChange(change, contentWidth - 4)}`,
-        ),
-      );
-    }
-    if (changes.length > shown.length) {
-      lines.push(
-        body(`   ${color.dim(`… ${changes.length - shown.length} more files`)}`),
-      );
-    }
+    for (const line of changeSummaryLines(changes, contentWidth)) lines.push(body(line));
     for (const line of changeDiffLines(card, contentWidth, expandDiffs)) lines.push(body(line));
   }
 
@@ -275,11 +270,4 @@ export function renderCardPanel(
   lines.push(`${statusColor("└")}${statusColor("─".repeat(contentWidth))}${statusColor("┘")}`);
 
   return lines;
-}
-
-/**
- * Status border color for a card - no blue, no dim blue.
- */
-export function statusBorderColor(status: StepStatus): (s: string) => string {
-  return STATUS_BORDER[status];
 }

@@ -1,8 +1,7 @@
 import type { ToolCall } from "../types.js";
 import type { FileChange } from "../tools/types.js";
 import { describeCall, summarizeToolResult } from "./renderer.js";
-import { formatNumber, oneLine } from "../util/text.js";
-import { color } from "../util/ansi.js";
+import { oneLine } from "../util/text.js";
 
 export type StepStatus = "running" | "ok" | "warning" | "error";
 
@@ -41,66 +40,52 @@ export interface ActivityCard {
   permission?: ShellApproval;
 }
 
-export type ChatMessage =
-  | { role: "user"; text: string }
-  | { role: "assistant"; text: string }
-  | { role: "activity"; card: ActivityCard };
-
-const STATUS_ICON: Record<StepStatus, string> = {
-  running: "⋯",
-  ok: "✓",
-  warning: "⚠",
-  error: "✗",
+const TOOL_INTENTS: Record<string, string> = {
+  bash: "Running shell command",
+  read: "Reading file",
+  write: "Writing file",
+  edit: "Editing file",
+  glob: "Searching files",
+  grep: "Searching code",
+  list: "Listing directory",
+  delete: "Deleting file",
+  copy: "Copying file",
+  move: "Moving file",
+  mkdir: "Creating directory",
 };
 
-const STATUS_COLOR: Record<StepStatus, (s: string) => string> = {
-  running: color.gray,
-  ok: color.gray,
-  warning: color.yellow,
-  error: color.red,
-};
+const HIGH_RISK_PATTERNS = [
+  "rm ",
+  "rmdir",
+  "del ",
+  "format",
+  "fdisk",
+  "mkfs",
+  "shutdown",
+  "reboot",
+  "drop ",
+  "kill -9",
+  "killall",
+];
 
-const STATUS_BORDER: Record<StepStatus, (s: string) => string> = {
-  running: color.gray,
-  ok: color.gray,
-  warning: color.yellow,
-  error: color.red,
-};
-
-function shortToolName(name: string): string {
-  return name.length > 12 ? `${name.slice(0, 11)}…` : name;
-}
-
-export function formatStep(step: Step, width: number): string {
-  const icon = STATUS_COLOR[step.status](STATUS_ICON[step.status]);
-  const name = color.gray(shortToolName(step.tool));
-  const summary = color.dim(step.summary);
-  let line = `├─ ${icon} ${name}  ${summary}`;
-  if (step.durationMs !== undefined && step.status !== "running") {
-    line += `  ${color.gray(`(${step.durationMs}ms)`)}`;
-  }
-  return truncateWidth(line, width);
-}
+const MEDIUM_RISK_PATTERNS = [
+  "npm install",
+  "npm uninstall",
+  "pip install",
+  "pip uninstall",
+  "chmod ",
+  "chown ",
+  "sudo ",
+  "git push",
+  "git reset",
+  "git checkout",
+  "> ",
+  ">> ",
+];
 
 export function intentForTool(call: ToolCall, input: Record<string, unknown>): string {
   const summary = describeCall(call, input);
-  const tool = call.name;
-
-  const intents: Record<string, string> = {
-    bash: "Running shell command",
-    read: "Reading file",
-    write: "Writing file",
-    edit: "Editing file",
-    glob: "Searching files",
-    grep: "Searching code",
-    list: "Listing directory",
-    delete: "Deleting file",
-    copy: "Copying file",
-    move: "Moving file",
-    mkdir: "Creating directory",
-  };
-
-  const base = intents[tool] ?? "Running tool";
+  const base = TOOL_INTENTS[call.name] ?? "Running tool";
 
   if (summary && summary.length > 0) {
     const short = summary.length > 40 ? summary.slice(0, 37) + "…" : summary;
@@ -117,13 +102,12 @@ export function shellApprovalFor(
   const command = describeCall(call, input);
   const primary = extractPrimaryCommand(command);
   const risk = classifyRisk(command);
-  const riskLevel = riskLevelFor(risk);
 
   return {
     tool: call.name,
     explanation: generateExplanation(call.name, command),
     reason: generateReason(call.name, command),
-    riskLevel,
+    riskLevel: risk,
     risk,
     primaryCommand: primary,
     fullCommand: command,
@@ -137,16 +121,9 @@ function extractPrimaryCommand(command: string): string {
 
 function classifyRisk(command: string): "LOW" | "MEDIUM" | "HIGH" {
   const lower = command.toLowerCase();
-  const highRisk = ["rm ", "rmdir", "del ", "format", "fdisk", "mkfs", "shutdown", "reboot", "drop ", "kill -9", "killall"];
-  const medRisk = ["npm install", "npm uninstall", "pip install", "pip uninstall", "chmod ", "chown ", "sudo ", "git push", "git reset", "git checkout", "> ", ">> "];
-
-  if (highRisk.some((r) => lower.includes(r))) return "HIGH";
-  if (medRisk.some((r) => lower.includes(r))) return "MEDIUM";
+  if (HIGH_RISK_PATTERNS.some((pattern) => lower.includes(pattern))) return "HIGH";
+  if (MEDIUM_RISK_PATTERNS.some((pattern) => lower.includes(pattern))) return "MEDIUM";
   return "LOW";
-}
-
-function riskLevelFor(risk: "LOW" | "MEDIUM" | "HIGH"): "LOW" | "MEDIUM" | "HIGH" {
-  return risk;
 }
 
 function generateExplanation(tool: string, command: string): string {
@@ -177,32 +154,6 @@ function generateReason(tool: string, command: string): string {
     return "I need to run this command to complete the task.";
   }
   return `I need to run ${tool} to complete the task.`;
-}
-
-function truncateWidth(text: string, width: number): string {
-  const visible = text.replace(/\u001b\[[0-9;]*m/g, "");
-  if (visible.length <= width) return text;
-  let out = "";
-  let used = 0;
-  let inAnsi = false;
-  for (const char of text) {
-    if (char === "\u001b") {
-      inAnsi = true;
-      out += char;
-      continue;
-    }
-    if (inAnsi) {
-      out += char;
-      if (char >= "A" && char <= "Z") inAnsi = false;
-      continue;
-    }
-    if (used + 1 > width - 1) {
-      return out + "…";
-    }
-    out += char;
-    used++;
-  }
-  return text;
 }
 
 export class ActivityTracker {
@@ -364,10 +315,6 @@ export class ActivityTracker {
     else if (card.steps.some((step) => step.status === "running")) card.status = "running";
     else if (card.steps.some((step) => step.status === "warning")) card.status = "warning";
     else card.status = "ok";
-  }
-
-  getRenderCards(): ActivityCard[] {
-    return this.cards;
   }
 
   findCard(id: string): ActivityCard | undefined {
