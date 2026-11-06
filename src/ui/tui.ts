@@ -119,6 +119,11 @@ export class Tui {
     hasSentFirstMessage = false;
     lastInterrupt = 0;
     cleaned = false;
+    /** Session picker state */
+    sessionPickerOpen = false;
+    sessionEntries: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> = [];
+    sessionPickerResolve?: () => void;
+    sessionPickerTask?: Promise<void>;
     /** Agent status strip state. */
     agentStatus;
     done;
@@ -213,9 +218,12 @@ export class Tui {
     onData = (chunk) => {
         const events = this.parser.push(chunk);
         for (const event of events) {
-            // Ignore mouse events (wheel, clicks) so only the keyboard
-            // scrolls the transcript.
-            if (event.type === "mouse") continue;
+            if (event.type === "mouse") {
+                // Left click on the top row toggles the sessions picker.
+                if (event.button === 0 && event.y === 1)
+                    this.toggleSessionPicker();
+                continue;
+            }
             if (this.approval) {
                 this.handleApprovalKey(event);
                 continue;
@@ -269,6 +277,10 @@ export class Tui {
         }
         if (this.paletteOpen) {
             this.handlePaletteKey(event);
+            return;
+        }
+        if (event.name === "s" && event.alt) {
+            this.toggleSessionPicker();
             return;
         }
         if (event.type === "text") {
@@ -882,6 +894,8 @@ export class Tui {
         };
     }
     activeOverlay(height) {
+        if (this.sessionPickerOpen)
+            return this.renderSessionPickerOverlay(height);
         if (this.queueManagerOpen)
             return this.queueOverlay(height);
         if (this.providerPickerOpen)
@@ -891,6 +905,84 @@ export class Tui {
         if (this.paletteOpen)
             return this.paletteOverlay(height);
         return undefined;
+    }
+    /** Render the session-picker overlay body when the picker is open. */
+    renderSessionPickerOverlay(): OverlayView {
+        const body: string[] = [];
+        body.push(color.dim("Sessions"));
+        for (const entry of this.sessionEntries) {
+            const marker = entry.id === this.state.session.id ? "*" : " ";
+            const updated = entry.updatedAt.slice(0, 10);
+            body.push(`${marker} ${entry.title} · ${entry.messageCount} msgs · ${updated}`);
+        }
+        return {
+            title: "Sessions",
+            body,
+            footer: "↑↓ select · Enter load · Esc close",
+        };
+    }
+    /** Open the sessions overlay and populate the session list. */
+    openSessionPicker() {
+        if (this.sessionPickerOpen)
+            return;
+        this.sessionPickerOpen = true;
+        this.sessionPickerTask = new Promise<void>((resolve) => {
+            this.sessionPickerResolve = resolve;
+        });
+        this.runtime.listSessions().then((metas) => {
+            this.sessionEntries = metas.map((m) => ({
+                id: m.id,
+                title: m.title ?? m.id,
+                updatedAt: m.updatedAt,
+                messageCount: m.messageCount,
+            }));
+            this.sessionPickerResolve?.();
+        });
+    }
+    /** Close the session picker overlay. */
+    closeSessionPicker() {
+        this.sessionPickerOpen = false;
+        this.sessionPickerResolve?.();
+    }
+    /** Toggle the sessions overlay from the top-left tab or Alt+S. */
+    toggleSessionPicker() {
+        if (this.sessionPickerOpen)
+            this.closeSessionPicker();
+        else
+            this.openSessionPicker();
+        this.paint();
+    }
+    /** Open the sessions overlay (used by /sessions and Alt+S). */
+    showSessionPicker(): Promise<void> {
+        this.toggleSessionPicker();
+        return Promise.resolve();
+    }
+    /** Handle a parsed mouse event; used by the TUI to hit-test the toggle. */
+    handleMouse(event: { type: "mouse"; button: number; x: number; y: number; release: boolean }): boolean {
+        if (event.button === 0 && event.y === 1) {
+            this.toggleSessionPicker();
+            return true;
+        }
+        return false;
+    }
+    /** Load a selected session: save current session, rebuild runtime, hydrate history. */
+    async selectSession(entry: { id: string; title: string; updatedAt: string; messageCount: number }) {
+        const loaded = await this.runtime.loadSession(entry.id);
+        const rebuilt = await this.runtime.rebuild({ session: loaded });
+        // Update shared chat state.
+        this.state.session = rebuilt.session;
+        this.state.agent = rebuilt.agent;
+        this.state.providerId = rebuilt.providerId;
+        this.state.model = rebuilt.model;
+        // Reset activity so the new session starts clean.
+        if (this.activityTracker)
+            this.activityTracker.reset();
+        // Clear transcript and hydrate the loaded history.
+        this.transcript.clear();
+        this.transcript.hydrate(rebuilt.session);
+        this.sessionPickerOpen = false;
+        this.sessionPickerResolve?.();
+        this.paint();
     }
     handleProviderPickerKey(event) {
         if (this.providerEndpointMode) {
@@ -1554,6 +1646,7 @@ export class Tui {
             agentName: "Cavehound",
             agentMode: this.busy ? "running" : "idle",
             agentStatus: this.buildAgentStatus(width, height),
+            sessionTab: this.sessionPickerOpen ? { open: true } : { open: false },
         });
     }
     /** Build the agent status strip input from current Tui state. */

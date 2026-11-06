@@ -33,6 +33,22 @@ describe("provider picker commands", () => {
     assert.deepEqual(calls, ["picker"]);
   });
 
+  it("routes /sessions to the interactive picker when available", async () => {
+    const calls: string[] = [];
+    const host = {
+      listSessions: async () => [],
+      showSessionPicker: async () => {
+        calls.push("picker");
+      },
+    } as unknown as CommandHost;
+    const state = {} as ChatState;
+    const sink: CommandSink = { info: () => undefined, error: () => undefined };
+
+    await handleSlashCommand("/sessions", host, state, sink);
+
+    assert.deepEqual(calls, ["picker"]);
+  });
+
   it("refuses to delete the active provider", async () => {
     const errors: string[] = [];
     const host = {} as CommandHost;

@@ -183,6 +183,12 @@ export class ActivityTracker {
     return this.verbose;
   }
 
+  reset(): void {
+    this.cards.length = 0;
+    this.currentCardId = undefined;
+    this.stepCounter = 0;
+  }
+
   startCard(intent: string): ActivityCard {
     const id = `card-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const card: ActivityCard = {

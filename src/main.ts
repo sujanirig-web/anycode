@@ -367,6 +367,7 @@ export async function main(argv: string[]): Promise<number> {
       const tui = new Tui(runtime);
       runtime.showModelPicker = tui.showModelPicker.bind(tui);
       runtime.showProviderPicker = tui.showProviderPicker.bind(tui);
+      runtime.showSessionPicker = tui.showSessionPicker.bind(tui);
       await tui.run();
     } else {
       await runRepl(runtime);

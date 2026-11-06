@@ -114,6 +114,10 @@ export async function handleSlashCommand(
 
     case "sessions": {
       const sessions = await host.listSessions();
+      if (typeof host.showSessionPicker === "function") {
+        await host.showSessionPicker();
+        return false;
+      }
       if (sessions.length === 0) {
         sink.info("No saved sessions in this directory.");
         return false;

@@ -56,6 +56,8 @@ export interface FrameInput {
   statusLeft?: string;
   /** Deprecated: status line text (right). Kept for backwards compatibility. */
   statusRight?: string;
+  /** Session toggle state */
+  sessionTab?: { open: boolean };
 }
 
 /** A multi-row mark rendered to the left of the status text. */
@@ -637,13 +639,15 @@ export function composeFrame(input: FrameInput): Frame {
 
   // Reserve fixed chrome first, then spend whatever is left on the transcript
   // and the bottom gap. Shrinking the gap keeps small terminals usable.
-  const fixedRows =
+  const fixedRowsBase =
     headerRows + 1 + statusBlockRows + queueBlockRows + composerLines.length + footerRows;
+  const toggleRowAdded = input.sessionTab ? 1 : 0;
+  const actualFixedRows = fixedRowsBase + toggleRowAdded;
   const bottomGap = Math.max(
     0,
-    Math.min(COMPOSER_BOTTOM_GAP, height - fixedRows - 1),
+    Math.min(COMPOSER_BOTTOM_GAP, height - actualFixedRows - 1),
   );
-  let bodyHeight = height - fixedRows - bottomGap;
+  let bodyHeight = height - actualFixedRows - bottomGap;
   if (bodyHeight < 1) bodyHeight = 1;
 
   const lines: string[] = [];
@@ -709,6 +713,13 @@ export function composeFrame(input: FrameInput): Frame {
   for (let index = 0; index < bottomGap; index++) lines.push("");
 
   while (lines.length < height - 1) lines.push("");
+
+  // Prepend a clickable sessions toggle row at the top-left.
+  if (input.sessionTab) {
+    const toggleRow = input.sessionTab.open ? "▾ Sessions" : "☰ Sessions";
+    const paddedToggle = color.dim(padToWidth(" " + toggleRow, width - 1));
+    lines.unshift(paddedToggle);
+  }
 
   // Hint footer lives outside the interface, pinned to the bottom edge.
   lines.push(color.dim(truncateWidth(COMPOSER_FOOTER, width)));

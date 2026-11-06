@@ -40,6 +40,8 @@ export interface ChatRuntime {
   showModelPicker?(): Promise<void>;
   /** Open the interactive provider picker (TUI only). */
   showProviderPicker?(): Promise<void>;
+  /** Open the session picker overlay (TUI only). */
+  showSessionPicker?(): Promise<void>;
 }
 
 /** Everything an interactive front end (REPL or TUI) needs, built by `main.ts`. */

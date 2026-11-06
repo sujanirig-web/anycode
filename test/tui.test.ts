@@ -78,6 +78,16 @@ describe("KeyParser", () => {
     assert.equal(escape.pendingLength, 1);
     assert.deepEqual(escape.flush(), [{ type: "key", name: "escape" }]);
   });
+
+  it("parses SGR mouse clicks with coordinates", () => {
+    const mouse = new KeyParser();
+    assert.deepEqual(mouse.push("\u001b[<0;5;1M"), [
+      { type: "mouse", button: 0, x: 5, y: 1, release: false },
+    ]);
+    assert.deepEqual(mouse.push("\u001b[<0;5;1m"), [
+      { type: "mouse", button: 0, x: 5, y: 1, release: true },
+    ]);
+  });
 });
 
 describe("Editor", () => {
@@ -336,6 +346,18 @@ describe("composeFrame", () => {
     assert.match(lines.slice(top, bottom + 1).join("\n"), /Enter run/);
     assert.match(lines.join("\n"), /next question/, "the composer stays visible");
     for (const line of result.lines) assert.ok(stringWidth(line) <= 80, line);
+  });
+
+  it("renders a clickable sessions toggle in the top-left corner", () => {
+    const base = frame({ showHeader: false });
+    const closed = frame({ showHeader: false, sessionTab: { open: false } });
+    const open = frame({ showHeader: false, sessionTab: { open: true } });
+
+    assert.match(plain(closed.lines[0] ?? ""), /^ ☰ Sessions/);
+    assert.match(plain(open.lines[0] ?? ""), /^ ▾ Sessions/);
+    assert.equal(closed.bodyHeight, base.bodyHeight - 1, "the toggle reserves one chrome row");
+    assert.equal(closed.lines.length, 24);
+    for (const line of closed.lines) assert.ok(stringWidth(line) <= 80, line);
   });
 
   it("keeps the overlay inside a narrow frame", () => {
@@ -958,6 +980,89 @@ describe("composeFrame", () => {
     assert.ok(lines[composerIdx - 1]?.trim() === "", "there should be a blank line before the composer");
   });
 
+});
+
+describe("Tui session picker", () => {
+  function fixtureSession(id: string, messages: Array<Record<string, unknown>> = []) {
+    return {
+      id,
+      title: `Session ${id}`,
+      provider: "test",
+      model: "test",
+      messages,
+      save: () => undefined,
+    };
+  }
+
+  function makeTui(overrides: Record<string, unknown> = {}): Tui {
+    const runtime = {
+      session: fixtureSession("current"),
+      agent: {},
+      providerId: "test",
+      model: "test",
+      broker: {},
+      listSessions: async () => [
+        {
+          id: "older",
+          title: "Older work",
+          updatedAt: "2026-11-06T10:00:00.000Z",
+          messageCount: 2,
+        },
+      ],
+      loadSession: async (id: string) =>
+        fixtureSession(id, [
+          { role: "user", content: "older question" },
+          { role: "assistant", content: "older answer" },
+        ]),
+      rebuild: async ({ session }: { session: unknown }) => ({
+        agent: {},
+        session,
+        providerId: "test",
+        model: "test",
+      }),
+      ...overrides,
+    };
+    const tui = new Tui(runtime);
+    tui.cleaned = true;
+    return tui;
+  }
+
+  it("opens the picker from the top-left tab and lists saved sessions", async () => {
+    const tui = makeTui();
+
+    const handled = tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: false });
+    assert.equal(handled, true);
+    assert.equal(tui.sessionPickerOpen, true);
+
+    await tui.sessionPickerTask;
+    assert.equal(tui.sessionEntries.length, 1);
+    assert.equal(tui.sessionEntries[0]?.id, "older");
+
+    tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: false });
+    assert.equal(tui.sessionPickerOpen, false);
+  });
+
+  it("loads the selected session history into the transcript", async () => {
+    const tui = makeTui();
+    await tui.openSessionPicker();
+
+    await tui.selectSession(tui.sessionEntries[0]!);
+
+    assert.equal(tui.state.session.id, "older");
+    assert.equal(tui.sessionPickerOpen, false);
+    const rendered = tui.transcript.render(80, false).join("\n");
+    assert.match(plain(rendered), /older question/);
+    assert.match(plain(rendered), /older answer/);
+  });
+
+  it("ignores clicks outside the sessions tab", () => {
+    const tui = makeTui();
+
+    const handled = tui.handleMouse({ type: "mouse", button: 0, x: 20, y: 5, release: false });
+
+    assert.equal(handled, false);
+    assert.equal(tui.sessionPickerOpen, false);
+  });
 });
 
 describe("Tui jump to latest", () => {

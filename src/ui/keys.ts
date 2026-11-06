@@ -9,6 +9,14 @@ export interface KeyPress {
 
 export interface MouseEvent {
   type: "mouse";
+  /** Mouse button: 0 = left, 1 = middle, 2 = right, 64/65 = wheel. */
+  button: number;
+  /** Column index (1-based). */
+  x: number;
+  /** Row index (1-based). */
+  y: number;
+  /** true when the button was released (`m` terminator). */
+  release: boolean;
 }
 
 export interface TextInput {
@@ -21,7 +29,7 @@ export type KeyEvent = KeyPress | MouseEvent | TextInput;
 const PRINTABLE = /^[A-Za-z0-9]$/;
 // Non-global regexes are safe to reuse across calls; hoisting avoids allocating
 // a new matcher on every parser iteration.
-const MOUSE_SEQUENCE = /^\u001b\[<[0-9;]*[Mm]/;
+const MOUSE_SEQUENCE = /^\u001b\[<([0-9]*);([0-9]*);([0-9]*)([Mm])/;
 const CSI_SEQUENCE = /^\u001b\[([0-9;?]*)([@-~])/;
 const SS3_SEQUENCE = /^\u001bO([A-Za-z])/;
 
@@ -193,11 +201,15 @@ export class KeyParser {
 
       if (buffer[1] === "[") {
         // Mouse protocol (SGR mode ?1006h): \e[<{button};{x};{y}[Mm]
-        // Consume and ignore mouse events so only the keyboard scrolls.
+        // Capture button, x, y and release flag so the TUI can hit-test.
         const mouseMatch = MOUSE_SEQUENCE.exec(buffer);
         if (mouseMatch) {
           buffer = buffer.slice(mouseMatch[0].length);
-          events.push({ type: "mouse" });
+          const button = Number(mouseMatch[1] ?? "0") || 0;
+          const x = Number(mouseMatch[2] ?? "1") || 1;
+          const y = Number(mouseMatch[3] ?? "1") || 1;
+          const release = mouseMatch[4] === "m";
+          events.push({ type: "mouse", button, x, y, release });
           continue;
         }
         const match = CSI_SEQUENCE.exec(buffer);
