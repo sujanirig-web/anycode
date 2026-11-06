@@ -644,8 +644,26 @@ export function composeFrame(input: FrameInput): Frame {
   const scroll = clamp(input.scroll, 0, Math.max(0, total - 1));
   const end = Math.max(0, total - scroll);
   const start = Math.max(0, end - bodyHeight);
-  const visible = input.transcript.slice(start, end);
-  while (visible.length < bodyHeight) visible.unshift("");
+  let visible = input.transcript.slice(start, end);
+
+  if (scroll > 0) {
+    // When scrolled up, keep content at the top of the chat area and show
+    // the scrollback indicator on the first line.
+    const label = ` ↓ ${scroll} line${scroll === 1 ? "" : "s"} below · [End] jump to latest `;
+    visible[0] = color.dim(label);
+    while (visible.length < bodyHeight) visible.push("");
+  } else {
+    // Center the conversation vertically within the chat area so the chat
+    // sits in the middle of the screen instead of being pinned to the top.
+    const padTotal = Math.max(0, bodyHeight - visible.length);
+    const padTop = Math.floor(padTotal / 2);
+    const padBottom = padTotal - padTop;
+    visible = [
+      ...Array.from({ length: padTop }, () => ""),
+      ...visible,
+      ...Array.from({ length: padBottom }, () => ""),
+    ];
+  }
 
   if (scroll > 0 && visible.length > 0) {
     const label = ` ↓ ${scroll} line${scroll === 1 ? "" : "s"} below · [End] jump to latest `;
@@ -677,15 +695,12 @@ export function composeFrame(input: FrameInput): Frame {
     lines.push(...queuedLines);
   }
 
-  // Keep a little padding between the conversation and the chat controls.
+  // Separate the conversation from the chat controls with a single gap.
   if (statusLines.length > 0) {
     lines.push("");
     lines.push(...statusLines);
-    // One blank line between status strip and composer
-    lines.push("");
-  } else {
-    lines.push("");
   }
+  lines.push("");
 
   const composerStartRow = lines.length;
   lines.push(...composerLines);
