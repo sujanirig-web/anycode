@@ -89,6 +89,11 @@ export interface Frame {
   cursor?: { row: number; col: number };
   /** Transcript rows available in the frame (for page scrolling). */
   bodyHeight: number;
+  /**
+   * Absolute frame rows occupied by overlay body entries, mapped back to their
+   * index in the original body array. Used for mouse hit-testing.
+   */
+  overlayBody?: Array<{ row: number; index: number }>;
 }
 
 const MIN_WIDTH = 20;
@@ -525,7 +530,7 @@ function renderOverlayRows(
   width: number,
   top: number,
   bottom: number,
-): OverlayRow[] {
+): { rows: OverlayRow[]; bodyRows: Array<{ row: number; index: number }> } {
   const usableWidth = Math.max(1, width - 1);
   const margin = usableWidth >= 50 ? 8 : 4;
   const boxWidth = Math.max(12, Math.min(72, usableWidth - margin));
@@ -537,10 +542,12 @@ function renderOverlayRows(
 
   let body = overlay.body;
   let highlighted = overlay.highlight;
+  let bodyOffset = 0;
   if (body.length > maxBodyRows) {
     const focus = highlighted ?? 0;
     const start = Math.max(0, Math.min(focus - maxBodyRows + 1, body.length - maxBodyRows));
     body = body.slice(start, start + maxBodyRows);
+    bodyOffset = start;
     if (highlighted !== undefined) highlighted -= start;
   }
   if (highlighted !== undefined && (highlighted < 0 || highlighted >= body.length)) {
@@ -591,7 +598,16 @@ function renderOverlayRows(
       line: `${left}${composerBackground(padToWidth(boxLines[index] ?? "", boxWidth))}${right}`,
     });
   }
-  return rows;
+
+  // Body entry `index` sits after the top border, so its frame row is
+  // start + 1 + index. Map back to the unsliced body array for hit-testing.
+  const bodyRows: Array<{ row: number; index: number }> = [];
+  for (let index = 0; index < body.length; index++) {
+    const row = start + 1 + index;
+    if (row >= bottom) break;
+    bodyRows.push({ row, index: bodyOffset + index });
+  }
+  return { rows, bodyRows };
 }
 
 /**
@@ -739,10 +755,11 @@ export function composeFrame(input: FrameInput): Frame {
 
   if (input.overlay) {
     const framed = [...frame];
-    for (const { row, line } of renderOverlayRows(input.overlay, width, chatStart, chatEnd)) {
+    const overlayRows = renderOverlayRows(input.overlay, width, chatStart, chatEnd);
+    for (const { row, line } of overlayRows.rows) {
       if (row >= 0 && row < framed.length) framed[row] = line;
     }
-    return { lines: framed, bodyHeight };
+    return { lines: framed, bodyHeight, overlayBody: overlayRows.bodyRows };
   }
 
   const cursorRow = composerStartRow + 1 + composerLayout.cursorRow - composerViewportRange.start;

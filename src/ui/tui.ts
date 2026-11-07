@@ -122,6 +122,7 @@ export class Tui {
     /** Session picker state */
     sessionPickerOpen = false;
     sessionEntries: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> = [];
+    sessionSelected = 0;
     sessionPickerResolve?: () => void;
     sessionPickerTask?: Promise<void>;
     /** Agent status strip state. */
@@ -222,11 +223,8 @@ export class Tui {
         const events = this.parser.push(chunk);
         for (const event of events) {
             if (event.type === "mouse") {
-                // Left click on the top row toggles the sessions picker.
-                // Only toggle on button press (M), not release (m), otherwise a
-                // single click opens and immediately closes the picker.
-                if (event.button === 0 && event.y === 1 && !event.release)
-                    this.toggleSessionPicker();
+                // Only press events act; release would re-fire on the same spot.
+                this.handleMouse(event);
                 continue;
             }
             if (this.approval) {
@@ -266,6 +264,10 @@ export class Tui {
     handleKey(event) {
         if (this.approval) {
             this.handleApprovalKey(event);
+            return;
+        }
+        if (this.sessionPickerOpen) {
+            this.handleSessionPickerKey(event);
             return;
         }
         if (this.modelPickerOpen) {
@@ -914,23 +916,61 @@ export class Tui {
     /** Render the session-picker overlay body when the picker is open. */
     renderSessionPickerOverlay(): OverlayView {
         const body: string[] = [];
-        body.push(color.dim("Sessions"));
-        for (const entry of this.sessionEntries) {
-            const marker = entry.id === this.state.session.id ? "*" : " ";
-            const updated = entry.updatedAt.slice(0, 10);
-            body.push(`${marker} ${entry.title} · ${entry.messageCount} msgs · ${updated}`);
+        if (this.sessionEntries.length === 0) {
+            body.push(color.dim("No saved sessions yet"));
+        }
+        else {
+            for (const entry of this.sessionEntries) {
+                const marker = entry.id === this.state.session.id ? "*" : " ";
+                const updated = entry.updatedAt.slice(0, 10);
+                body.push(`${marker} ${entry.title} · ${entry.messageCount} msgs · ${updated}`);
+            }
         }
         return {
             title: "Sessions",
             body,
             footer: "↑↓ select · Enter load · Esc close",
+            ...(this.sessionEntries.length > 0 ? { highlight: this.sessionSelected } : {}),
         };
+    }
+    /** Navigate and confirm entries in the sessions overlay. */
+    handleSessionPickerKey(event) {
+        if (event.type !== "key")
+            return;
+        if (event.ctrl && event.name === "q") {
+            this.quit();
+            return;
+        }
+        if (event.name === "escape" || (event.alt && event.name === "s")) {
+            this.closeSessionPicker();
+            this.paint();
+            return;
+        }
+        const count = this.sessionEntries.length;
+        if (count === 0)
+            return;
+        if (event.name === "up" || (!event.ctrl && !event.alt && event.name === "k")) {
+            this.sessionSelected = (this.sessionSelected - 1 + count) % count;
+            this.paint();
+            return;
+        }
+        if (event.name === "down" || (!event.ctrl && !event.alt && event.name === "j")) {
+            this.sessionSelected = (this.sessionSelected + 1) % count;
+            this.paint();
+            return;
+        }
+        if (event.name === "enter") {
+            const entry = this.sessionEntries[this.sessionSelected];
+            if (entry)
+                void this.selectSession(entry);
+        }
     }
     /** Open the sessions overlay and populate the session list. */
     openSessionPicker() {
         if (this.sessionPickerOpen)
             return;
         this.sessionPickerOpen = true;
+        this.sessionSelected = 0;
         this.sessionPickerTask = new Promise<void>((resolve) => {
             this.sessionPickerResolve = resolve;
         });
@@ -941,7 +981,14 @@ export class Tui {
                 updatedAt: m.updatedAt,
                 messageCount: m.messageCount,
             }));
+            this.sessionSelected = Math.min(this.sessionSelected, Math.max(0, this.sessionEntries.length - 1));
             this.sessionPickerResolve?.();
+            this.paint();
+        }).catch((error) => {
+            this.transcript.error(`Failed to list sessions: ${errorMessage(error)}`);
+            this.sessionEntries = [];
+            this.sessionPickerResolve?.();
+            this.paint();
         });
     }
     /** Close the session picker overlay. */
@@ -962,11 +1009,33 @@ export class Tui {
         this.toggleSessionPicker();
         return Promise.resolve();
     }
-    /** Handle a parsed mouse event; used by the TUI to hit-test the toggle. */
+    /** Handle a parsed mouse event: the top-left toggle and picker rows. */
     handleMouse(event: { type: "mouse"; button: number; x: number; y: number; release: boolean }): boolean {
-        if (event.button === 0 && event.y === 1 && !event.release) {
+        if (event.release)
+            return false;
+        // The toggle lives in the first frame row.
+        if (event.button === 0 && event.y === 1) {
             this.toggleSessionPicker();
             return true;
+        }
+        // Wheel over the open picker moves the selection.
+        if (this.sessionPickerOpen && (event.button === 64 || event.button === 65)) {
+            const count = this.sessionEntries.length;
+            if (count > 0) {
+                const delta = event.button === 64 ? -1 : 1;
+                this.sessionSelected = (this.sessionSelected + delta + count) % count;
+                this.paint();
+            }
+            return true;
+        }
+        // A left click on a session row loads that session.
+        if (this.sessionPickerOpen && event.button === 0 && this.frame?.overlayBody) {
+            const hit = this.frame.overlayBody.find((row) => row.row === event.y - 1);
+            const entry = hit ? this.sessionEntries[hit.index] : undefined;
+            if (entry) {
+                void this.selectSession(entry);
+                return true;
+            }
         }
         return false;
     }

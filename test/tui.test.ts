@@ -1079,6 +1079,59 @@ describe("Tui session picker", () => {
     assert.equal(tui.sessionPickerOpen, true);
   });
 
+  it("loads a session when Enter is pressed in the picker", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    assert.equal(tui.sessionSelected, 0);
+    tui.handleKey({ type: "key", name: "enter" });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tui.state.session.id, "older");
+    assert.equal(tui.sessionPickerOpen, false);
+  });
+
+  it("moves the picker selection with the arrow keys", async () => {
+    const tui = makeTui({
+      listSessions: async () => [
+        { id: "one", title: "One", updatedAt: "2026-11-06T10:00:00.000Z", messageCount: 1 },
+        { id: "two", title: "Two", updatedAt: "2026-11-06T11:00:00.000Z", messageCount: 2 },
+      ],
+    });
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    tui.handleKey({ type: "key", name: "down" });
+    assert.equal(tui.sessionSelected, 1);
+    tui.handleKey({ type: "key", name: "up" });
+    assert.equal(tui.sessionSelected, 0);
+  });
+
+  it("loads a session when its row is clicked in the picker", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    tui.frame = tui.compose(80, 24, []);
+    const row = tui.frame.overlayBody?.find(
+      (entry: { row: number; index: number }) => entry.index === 0,
+    );
+    assert.ok(row, "the picker should expose its clickable rows");
+
+    const handled = tui.handleMouse({
+      type: "mouse",
+      button: 0,
+      x: 10,
+      y: row.row + 1,
+      release: false,
+    });
+
+    assert.equal(handled, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tui.state.session.id, "older");
+  });
+
   it("loads the selected session history into the transcript", async () => {
     const tui = makeTui();
     await tui.openSessionPicker();
