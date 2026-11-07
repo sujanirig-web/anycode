@@ -153,7 +153,10 @@ export class Tui {
         }
     }
     enter() {
-        output.write(`${ALT_ON}${PASTE_ON}\u001b[?1006h\u001b[2J\u001b[H${CURSOR_OFF}`);
+        // Enable normal mouse tracking (?1000h) plus SGR extended coordinates
+        // (?1006h). Without the tracking mode terminals never report clicks,
+        // so the top-left toggle would be unreachable.
+        output.write(`${ALT_ON}${PASTE_ON}\u001b[?1000h\u001b[?1006h\u001b[2J\u001b[H${CURSOR_OFF}`);
         input.setRawMode?.(true);
         input.setEncoding("utf8");
         input.resume();
@@ -171,7 +174,7 @@ export class Tui {
         }
     }
     restore = () => {
-        output.write(`${PASTE_OFF}${CURSOR_ON}\u001b[?1006l${ALT_OFF}`);
+        output.write(`${PASTE_OFF}${CURSOR_ON}\u001b[?1006l\u001b[?1000l${ALT_OFF}`);
     };
     cleanup() {
         if (this.cleaned)

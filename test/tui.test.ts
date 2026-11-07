@@ -88,6 +88,26 @@ describe("KeyParser", () => {
       { type: "mouse", button: 0, x: 5, y: 1, release: true },
     ]);
   });
+
+  it("parses classic X10 mouse clicks and wheel events", () => {
+    const mouse = new KeyParser();
+    // \e[M + (button + 32, x + 32, y + 32): left press at column 5, row 1.
+    assert.deepEqual(mouse.push("\u001b[M" + String.fromCharCode(32, 36, 33)), [
+      { type: "mouse", button: 0, x: 4, y: 1, release: false },
+    ]);
+    // Wheel up must not look like a left click.
+    assert.deepEqual(mouse.push("\u001b[M" + String.fromCharCode(96, 36, 33)), [
+      { type: "mouse", button: 64, x: 4, y: 1, release: false },
+    ]);
+  });
+
+  it("buffers a split X10 mouse sequence", () => {
+    const mouse = new KeyParser();
+    assert.deepEqual(mouse.push("\u001b[M" + String.fromCharCode(32, 36)), []);
+    assert.deepEqual(mouse.push(String.fromCharCode(33)), [
+      { type: "mouse", button: 0, x: 4, y: 1, release: false },
+    ]);
+  });
 });
 
 describe("Editor", () => {
@@ -1040,6 +1060,23 @@ describe("Tui session picker", () => {
 
     tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: false });
     assert.equal(tui.sessionPickerOpen, false);
+  });
+
+  it("opens the picker from raw X10 mouse bytes on the top row", () => {
+    const tui = makeTui();
+
+    // Real terminal input path: \e[M + (button, x, y) each offset by 32.
+    tui.onData("\u001b[M" + String.fromCharCode(32, 35, 33));
+
+    assert.equal(tui.sessionPickerOpen, true);
+  });
+
+  it("likewise opens the picker from raw SGR mouse bytes", () => {
+    const tui = makeTui();
+
+    tui.onData("\u001b[<0;3;1M");
+
+    assert.equal(tui.sessionPickerOpen, true);
   });
 
   it("loads the selected session history into the transcript", async () => {

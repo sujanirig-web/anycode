@@ -199,6 +199,30 @@ export class KeyParser {
         continue;
       }
 
+      // Classic X10 mouse protocol: \e[M followed by three raw bytes
+      // (button + 32, x + 32, y + 32). Some terminals ignore SGR mode, so
+      // parse this fallback before the generic CSI handling below, which
+      // would otherwise swallow the payload as an unknown sequence.
+      if (buffer.startsWith("\u001b[M")) {
+        if (buffer.length < 6) {
+          if (!final) break;
+          events.push({ type: "key", name: "escape" });
+          buffer = buffer.slice(1);
+          continue;
+        }
+        const code = (buffer.charCodeAt(3) ?? 0) - 32;
+        const x = (buffer.charCodeAt(4) ?? 0) - 32;
+        const y = (buffer.charCodeAt(5) ?? 0) - 32;
+        buffer = buffer.slice(6);
+        // Bit 6 marks wheel events (64/65); bit 5 marks motion. Both must not
+        // be mistaken for a left-button press.
+        const wheel = (code & 64) !== 0;
+        const motion = (code & 32) !== 0;
+        const button = wheel ? 64 + (code & 1) : code & 3;
+        events.push({ type: "mouse", button, x, y, release: !wheel && !motion && button === 3 });
+        continue;
+      }
+
       if (buffer[1] === "[") {
         // Mouse protocol (SGR mode ?1006h): \e[<{button};{x};{y}[Mm]
         // Capture button, x, y and release flag so the TUI can hit-test.
