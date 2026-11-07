@@ -656,7 +656,7 @@ export function composeFrame(input: FrameInput): Frame {
   if (input.sessionTab) {
     // A single chevron toggle in the top-left corner; tapping it shows/hides
     // the sessions picker overlay. Label stays `<` so the button is stable.
-    const paddedToggle = color.dim(padToWidth("<", width - 1));
+    const paddedToggle = color.bold(color.white(padToWidth("<", width - 1)));
     lines.push(paddedToggle);
   }
   if (showHeader && bordered) {
