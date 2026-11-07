@@ -6,7 +6,7 @@ import path from "node:path";
 import { Agent } from "./agent/agent.js";
 import { PermissionBroker } from "./agent/permissions.js";
 import { createSystemPrompt } from "./agent/prompt.js";
-import { Session, latestSession, listSessions } from "./agent/session.js";
+import { Session, deleteSession, latestSession, listSessions } from "./agent/session.js";
 import { defaultBaseURLFor, loadConfig, saveGlobalConfig, saveProviderPreset, listConfiguredProviders, type Config, type ConfigOverrides } from "./config.js";
 import { UserError, errorMessage } from "./errors.js";
 import { createProvider } from "./llm/index.js";
@@ -345,6 +345,9 @@ export async function main(argv: string[]): Promise<number> {
       },
       listSessions: () => listSessions(cwd),
       loadSession: (id) => Session.load(cwd, id),
+      createSession: async () =>
+        Session.create({ cwd, provider: runtime.providerId, model: runtime.model }),
+      deleteSession: (id) => deleteSession(cwd, id),
       listProviders: async () => listConfiguredProviders(cwd),
       listModels: async (providerId) => {
         const providers = await listConfiguredProviders(cwd);

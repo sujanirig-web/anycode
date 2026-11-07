@@ -59,7 +59,9 @@ anycode v0.2.0 ─────────────────────�
 - **Approval gates** — writes, edits, and shell commands ask first. Approve once,
   always for the session, or disable prompts with `--yolo`.
 - **Sessions** — every turn is saved to `.anycode/sessions/<id>.json`. Resume
-  with `--continue`, `--session <id>`, or `anycode resume`.
+  with `--continue`, `--session <id>`, or `anycode resume`. In the TUI, click the
+  `<` in the top-left to browse saved sessions, start a `+ New session`, or
+  delete one.
 - **Interactive and one-shot modes** — slash commands (`/models`, `/connect`,
   `/resume`, `/usage`, `/yolo`, …), Ctrl+C interruption, and piping.
 - **NDJSON event stream** — `--json` emits every agent event as JSON lines for
@@ -258,6 +260,10 @@ Keys:
 | `ctrl+v` | Paste system clipboard text at the composer cursor |
 | `ctrl+d` or `esc` (empty composer) | Quit |
 | `ctrl+l` | Repaint the screen |
+| `<` in the top-left (or `alt+s`) | Open the session picker |
+| In the picker: `↑`/`↓`, `enter` | Move the selection and open the session |
+| In the picker: `+ New session` | Start a fresh session |
+| In the picker: `d` then `y` | Delete the highlighted session (Esc cancels) |
 
 While a tool asks for approval, `y` allows once, `a` always for the session, and
 `n` or `esc` denies.
@@ -273,7 +279,7 @@ Slash commands:
 /models            Browse models for the active provider
 /connect           Choose a provider, enter its API key, and connect
 /delete-provider <id>  Delete a saved custom provider preset
-/sessions          List saved sessions
+/sessions          Open the session picker (TUI) or list sessions
 /resume [id]       Resume a session (default: most recent)
 /yolo              Toggle auto-approve for the rest of the session
 /usage             Show token usage

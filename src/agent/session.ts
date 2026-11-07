@@ -162,6 +162,15 @@ export async function listSessions(cwd: string, limit = 30): Promise<SessionMeta
   return metas.slice(0, limit);
 }
 
+/** Delete a saved session file. Missing files are ignored. */
+export async function deleteSession(cwd: string, id: string): Promise<void> {
+  // Never let a crafted id escape the sessions directory.
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    throw new Error(`Invalid session id: ${id}`);
+  }
+  await fs.rm(path.join(sessionsDir(cwd), `${id}.json`), { force: true });
+}
+
 export async function latestSession(cwd: string): Promise<Session | undefined> {
   const [meta] = await listSessions(cwd, 1);
   if (!meta) return undefined;

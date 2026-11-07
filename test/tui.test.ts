@@ -4,9 +4,13 @@
 └──────────────────────────────────────────────────────────────────┘
 */
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { Session } from "../src/agent/session.js";
+import { Session, deleteSession, sessionsDir } from "../src/agent/session.js";
 import { colorEnabled } from "../src/util/ansi.js";
 import { Editor } from "../src/ui/editor.js";
 import { KeyParser } from "../src/ui/keys.js";
@@ -1034,6 +1038,8 @@ describe("Tui session picker", () => {
           { role: "user", content: "older question" },
           { role: "assistant", content: "older answer" },
         ]),
+      createSession: async () => fixtureSession("new-id"),
+      deleteSession: async () => undefined,
       rebuild: async ({ session }: { session: unknown }) => ({
         agent: {},
         session,
@@ -1084,12 +1090,134 @@ describe("Tui session picker", () => {
     tui.openSessionPicker();
     await tui.sessionPickerTask;
 
-    assert.equal(tui.sessionSelected, 0);
+    // Row 0 is "+ New session"; move down to the saved session.
+    tui.handleKey({ type: "key", name: "down" });
     tui.handleKey({ type: "key", name: "enter" });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(tui.state.session.id, "older");
     assert.equal(tui.sessionPickerOpen, false);
+  });
+
+  it("lists a + New session row above saved sessions", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    tui.frame = tui.compose(80, 24, []);
+    const rendered = tui.frame.lines.map((line: string) => plain(line)).join("\n");
+    assert.match(rendered, /\+ New session/);
+    assert.match(rendered, /Older work/);
+  });
+
+  it("starts a fresh session from the + row", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    assert.equal(tui.sessionSelected, 0);
+    tui.handleKey({ type: "key", name: "enter" });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tui.state.session.id, "new-id");
+    assert.equal(tui.sessionPickerOpen, false);
+    assert.equal(tui.transcript.isEmpty, true);
+  });
+
+  it("starts a fresh session when the + row is clicked", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+    tui.frame = tui.compose(80, 24, []);
+
+    const row = tui.frame.overlayBody?.find(
+      (entry: { row: number; index: number }) => entry.index === 0,
+    );
+    assert.ok(row);
+
+    const handled = tui.handleMouse({
+      type: "mouse",
+      button: 0,
+      x: 10,
+      y: row.row + 1,
+      release: false,
+    });
+
+    assert.equal(handled, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tui.state.session.id, "new-id");
+  });
+
+  it("deletes a session after confirmation", async () => {
+    const deleted: string[] = [];
+    let entries = [
+      { id: "one", title: "One", updatedAt: "2026-11-06T10:00:00.000Z", messageCount: 1 },
+      { id: "two", title: "Two", updatedAt: "2026-11-06T11:00:00.000Z", messageCount: 2 },
+    ];
+    const tui = makeTui({
+      listSessions: async () => entries,
+      deleteSession: async (id: string) => {
+        deleted.push(id);
+        entries = entries.filter((entry) => entry.id !== id);
+      },
+    });
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    // Rows: [new, one, two]; select "one" and arm the delete.
+    tui.handleKey({ type: "key", name: "down" });
+    tui.handleKey({ type: "text", text: "d" });
+    assert.equal(tui.sessionDeleteArmed?.id, "one");
+
+    tui.handleKey({ type: "text", text: "y" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(deleted, ["one"]);
+    assert.deepEqual(
+      tui.sessionEntries.map((entry: { id: string }) => entry.id),
+      ["two"],
+    );
+    assert.equal(tui.sessionPickerOpen, true);
+    assert.equal(tui.sessionDeleteArmed, undefined);
+  });
+
+  it("cancels a pending delete with Escape", async () => {
+    const tui = makeTui();
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    tui.handleKey({ type: "key", name: "down" });
+    tui.handleKey({ type: "text", text: "d" });
+    assert.ok(tui.sessionDeleteArmed);
+
+    tui.handleKey({ type: "key", name: "escape" });
+
+    assert.equal(tui.sessionDeleteArmed, undefined);
+    assert.equal(tui.sessionPickerOpen, true);
+  });
+
+  it("starts a fresh session when the active session is deleted", async () => {
+    const tui = makeTui({
+      listSessions: async () => [
+        {
+          id: "current",
+          title: "Current",
+          updatedAt: "2026-11-06T10:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+      deleteSession: async () => undefined,
+    });
+    tui.openSessionPicker();
+    await tui.sessionPickerTask;
+
+    // Rows: [new, current]; select the active session, delete, confirm.
+    tui.handleKey({ type: "key", name: "down" });
+    tui.handleKey({ type: "text", text: "d" });
+    tui.handleKey({ type: "text", text: "y" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(tui.state.session.id, "new-id");
   });
 
   it("moves the picker selection with the arrow keys", async () => {
@@ -1114,8 +1242,9 @@ describe("Tui session picker", () => {
     await tui.sessionPickerTask;
 
     tui.frame = tui.compose(80, 24, []);
+    // Row 0 is "+ New session", so the saved session is the next entry.
     const row = tui.frame.overlayBody?.find(
-      (entry: { row: number; index: number }) => entry.index === 0,
+      (entry: { row: number; index: number }) => entry.index === 1,
     );
     assert.ok(row, "the picker should expose its clickable rows");
 
@@ -1210,5 +1339,28 @@ describe("Tui jump to latest", () => {
     tui.handleKey({ type: "key", name: "end" });
     assert.equal(tui.scroll, 5);
     assert.equal(tui.scrollTarget, 5);
+  });
+});
+
+describe("session deletion", () => {
+  it("removes the saved file, is idempotent, and rejects unsafe ids", async () => {
+    const root = await mkdtemp(join(tmpdir(), "anycode-session-"));
+    try {
+      const session = Session.create({ cwd: root, provider: "test", model: "test" });
+      session.messages.push({ role: "user", content: "hello" });
+      await session.save();
+      const file = join(sessionsDir(root), `${session.id}.json`);
+      assert.equal(existsSync(file), true);
+
+      await deleteSession(root, session.id);
+      assert.equal(existsSync(file), false);
+
+      // Deleting again is a no-op rather than an error.
+      await deleteSession(root, session.id);
+
+      await assert.rejects(() => deleteSession(root, "../escape"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

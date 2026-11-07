@@ -123,6 +123,8 @@ export class Tui {
     sessionPickerOpen = false;
     sessionEntries: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> = [];
     sessionSelected = 0;
+    /** Session awaiting delete confirmation, if any. */
+    sessionDeleteArmed;
     sessionPickerResolve?: () => void;
     sessionPickerTask?: Promise<void>;
     /** Agent status strip state. */
@@ -913,57 +915,130 @@ export class Tui {
             return this.paletteOverlay(height);
         return undefined;
     }
+    /** Picker rows: a "+ New session" action followed by saved sessions. */
+    sessionPickerRows() {
+        return [
+            { kind: "new" },
+            ...this.sessionEntries.map((entry) => ({ kind: "session", entry })),
+        ];
+    }
     /** Render the session-picker overlay body when the picker is open. */
     renderSessionPickerOverlay(): OverlayView {
-        const body: string[] = [];
-        if (this.sessionEntries.length === 0) {
-            body.push(color.dim("No saved sessions yet"));
-        }
-        else {
-            for (const entry of this.sessionEntries) {
-                const marker = entry.id === this.state.session.id ? "*" : " ";
-                const updated = entry.updatedAt.slice(0, 10);
-                body.push(`${marker} ${entry.title} · ${entry.messageCount} msgs · ${updated}`);
-            }
-        }
+        const rows = this.sessionPickerRows();
+        const body = rows.map((row) => {
+            if (row.kind === "new")
+                return color.green("+ New session");
+            const entry = row.entry;
+            const marker = entry.id === this.state.session.id ? "*" : " ";
+            const updated = entry.updatedAt.slice(0, 10);
+            return `${marker} ${entry.title} · ${entry.messageCount} msgs · ${updated}`;
+        });
+        const armed = this.sessionDeleteArmed;
+        const footer = armed
+            ? `Delete "${String(armed.title).slice(0, 40)}"? Enter/y confirm · Esc cancel`
+            : "↑↓ select · Enter open · D delete · Esc close";
         return {
             title: "Sessions",
             body,
-            footer: "↑↓ select · Enter load · Esc close",
-            ...(this.sessionEntries.length > 0 ? { highlight: this.sessionSelected } : {}),
+            footer,
+            highlight: this.sessionSelected,
         };
     }
-    /** Navigate and confirm entries in the sessions overlay. */
-    handleSessionPickerKey(event) {
-        if (event.type !== "key")
+    /** Arm a delete for the highlighted session; confirm or cancel with y/Esc. */
+    armSessionDelete() {
+        const row = this.sessionPickerRows()[this.sessionSelected];
+        if (!row || row.kind !== "session")
             return;
-        if (event.ctrl && event.name === "q") {
+        this.sessionDeleteArmed = row.entry;
+        this.paint();
+    }
+    /** Delete the armed session and refresh the list. */
+    async deleteArmedSession() {
+        const entry = this.sessionDeleteArmed;
+        this.sessionDeleteArmed = undefined;
+        if (!entry)
+            return;
+        const wasActive = entry.id === this.state.session.id;
+        try {
+            await this.runtime.deleteSession(entry.id);
+        }
+        catch (error) {
+            this.transcript.error(`Failed to delete session: ${errorMessage(error)}`);
+            this.paint();
+            return;
+        }
+        if (wasActive) {
+            // The live session was deleted; continue in a clean one.
+            await this.startNewSession({ save: false });
+            return;
+        }
+        await this.refreshSessionEntries();
+        this.paint();
+    }
+    /** Navigate, open, create and delete entries in the sessions overlay. */
+    handleSessionPickerKey(event) {
+        if (event.type === "mouse")
+            return;
+        if (event.type === "key" && event.ctrl && event.name === "q") {
             this.quit();
             return;
         }
-        if (event.name === "escape" || (event.alt && event.name === "s")) {
+        // Printable keys arrive as text events; normalise them for shortcuts.
+        const text = event.type === "text" ? event.text.toLowerCase() : undefined;
+        const key = event.type === "key" ? event.name : undefined;
+        // Confirmation mode: only a yes/no matters.
+        if (this.sessionDeleteArmed) {
+            if (key === "enter" || text === "y")
+                void this.deleteArmedSession();
+            else if (key === "escape" || text === "n") {
+                this.sessionDeleteArmed = undefined;
+                this.paint();
+            }
+            return;
+        }
+        if (key === "escape" || (event.type === "key" && event.alt && event.name === "s")) {
             this.closeSessionPicker();
             this.paint();
             return;
         }
-        const count = this.sessionEntries.length;
-        if (count === 0)
-            return;
-        if (event.name === "up" || (!event.ctrl && !event.alt && event.name === "k")) {
-            this.sessionSelected = (this.sessionSelected - 1 + count) % count;
+        const rows = this.sessionPickerRows();
+        const count = rows.length;
+        const up = key === "up" || text === "k";
+        const down = key === "down" || text === "j";
+        if (up || down) {
+            this.sessionSelected = (this.sessionSelected + (down ? 1 : -1) + count) % count;
             this.paint();
             return;
         }
-        if (event.name === "down" || (!event.ctrl && !event.alt && event.name === "j")) {
-            this.sessionSelected = (this.sessionSelected + 1) % count;
-            this.paint();
+        if (key === "enter") {
+            const row = rows[this.sessionSelected];
+            if (row?.kind === "new")
+                void this.startNewSession();
+            else if (row?.kind === "session")
+                void this.selectSession(row.entry);
             return;
         }
-        if (event.name === "enter") {
-            const entry = this.sessionEntries[this.sessionSelected];
-            if (entry)
-                void this.selectSession(entry);
+        if (key === "delete" || text === "d") {
+            this.armSessionDelete();
         }
+    }
+    /** Reload the saved-session list, clamping the selection. */
+    async refreshSessionEntries() {
+        try {
+            const metas = await this.runtime.listSessions();
+            this.sessionEntries = metas.map((m) => ({
+                id: m.id,
+                title: m.title ?? m.id,
+                updatedAt: m.updatedAt,
+                messageCount: m.messageCount,
+            }));
+        }
+        catch (error) {
+            this.transcript.error(`Failed to list sessions: ${errorMessage(error)}`);
+            this.sessionEntries = [];
+        }
+        const max = Math.max(0, this.sessionPickerRows().length - 1);
+        this.sessionSelected = Math.min(this.sessionSelected, max);
     }
     /** Open the sessions overlay and populate the session list. */
     openSessionPicker() {
@@ -971,22 +1046,11 @@ export class Tui {
             return;
         this.sessionPickerOpen = true;
         this.sessionSelected = 0;
+        this.sessionDeleteArmed = undefined;
         this.sessionPickerTask = new Promise<void>((resolve) => {
             this.sessionPickerResolve = resolve;
         });
-        this.runtime.listSessions().then((metas) => {
-            this.sessionEntries = metas.map((m) => ({
-                id: m.id,
-                title: m.title ?? m.id,
-                updatedAt: m.updatedAt,
-                messageCount: m.messageCount,
-            }));
-            this.sessionSelected = Math.min(this.sessionSelected, Math.max(0, this.sessionEntries.length - 1));
-            this.sessionPickerResolve?.();
-            this.paint();
-        }).catch((error) => {
-            this.transcript.error(`Failed to list sessions: ${errorMessage(error)}`);
-            this.sessionEntries = [];
+        this.refreshSessionEntries().then(() => {
             this.sessionPickerResolve?.();
             this.paint();
         });
@@ -994,6 +1058,7 @@ export class Tui {
     /** Close the session picker overlay. */
     closeSessionPicker() {
         this.sessionPickerOpen = false;
+        this.sessionDeleteArmed = undefined;
         this.sessionPickerResolve?.();
     }
     /** Toggle the sessions overlay from the top-left tab or Alt+S. */
@@ -1020,7 +1085,7 @@ export class Tui {
         }
         // Wheel over the open picker moves the selection.
         if (this.sessionPickerOpen && (event.button === 64 || event.button === 65)) {
-            const count = this.sessionEntries.length;
+            const count = this.sessionPickerRows().length;
             if (count > 0) {
                 const delta = event.button === 64 ? -1 : 1;
                 this.sessionSelected = (this.sessionSelected + delta + count) % count;
@@ -1028,12 +1093,16 @@ export class Tui {
             }
             return true;
         }
-        // A left click on a session row loads that session.
+        // A left click opens a session row or the "+ New session" row.
         if (this.sessionPickerOpen && event.button === 0 && this.frame?.overlayBody) {
             const hit = this.frame.overlayBody.find((row) => row.row === event.y - 1);
-            const entry = hit ? this.sessionEntries[hit.index] : undefined;
-            if (entry) {
-                void this.selectSession(entry);
+            const row = hit ? this.sessionPickerRows()[hit.index] : undefined;
+            if (row?.kind === "new") {
+                void this.startNewSession();
+                return true;
+            }
+            if (row?.kind === "session") {
+                void this.selectSession(row.entry);
                 return true;
             }
         }
@@ -1041,22 +1110,62 @@ export class Tui {
     }
     /** Load a selected session: save current session, rebuild runtime, hydrate history. */
     async selectSession(entry: { id: string; title: string; updatedAt: string; messageCount: number }) {
-        const loaded = await this.runtime.loadSession(entry.id);
-        const rebuilt = await this.runtime.rebuild({ session: loaded });
-        // Update shared chat state.
-        this.state.session = rebuilt.session;
-        this.state.agent = rebuilt.agent;
-        this.state.providerId = rebuilt.providerId;
-        this.state.model = rebuilt.model;
-        // Reset activity so the new session starts clean.
-        if (this.activityTracker)
-            this.activityTracker.reset();
-        // Clear transcript and hydrate the loaded history.
-        this.transcript.clear();
-        this.transcript.hydrate(rebuilt.session);
-        this.sessionPickerOpen = false;
-        this.sessionPickerResolve?.();
-        this.paint();
+        try {
+            if (this.state.session.messages.length > 0)
+                await this.state.session.save().catch(() => undefined);
+            const loaded = await this.runtime.loadSession(entry.id);
+            const rebuilt = await this.runtime.rebuild({ session: loaded });
+            // Update shared chat state.
+            this.state.session = rebuilt.session;
+            this.state.agent = rebuilt.agent;
+            this.state.providerId = rebuilt.providerId;
+            this.state.model = rebuilt.model;
+            // Reset activity so the new session starts clean.
+            this.tracker.reset();
+            this.changedFiles.clear();
+            // Clear transcript and hydrate the loaded history.
+            this.transcript.clear();
+            this.transcript.hydrate(rebuilt.session);
+            this.hasSentFirstMessage = rebuilt.session.messages.some((message) => message.role === "user");
+            this.sessionPickerOpen = false;
+            this.sessionDeleteArmed = undefined;
+            this.sessionPickerResolve?.();
+            this.paint();
+        }
+        catch (error) {
+            this.transcript.error(`Failed to load session: ${errorMessage(error)}`);
+            this.sessionPickerOpen = false;
+            this.sessionPickerResolve?.();
+            this.paint();
+        }
+    }
+    /** Start a fresh session, optionally saving the current one first. */
+    async startNewSession(options: { save?: boolean } = {}) {
+        try {
+            if (options.save !== false && this.state.session.messages.length > 0)
+                await this.state.session.save().catch(() => undefined);
+            const created = await this.runtime.createSession();
+            const rebuilt = await this.runtime.rebuild({ session: created });
+            this.state.session = rebuilt.session;
+            this.state.agent = rebuilt.agent;
+            this.state.providerId = rebuilt.providerId;
+            this.state.model = rebuilt.model;
+            this.tracker.reset();
+            this.transcript.clear();
+            this.changedFiles.clear();
+            this.hasSentFirstMessage = false;
+            this.busy = undefined;
+            this.sessionPickerOpen = false;
+            this.sessionDeleteArmed = undefined;
+            this.sessionPickerResolve?.();
+            this.paint();
+        }
+        catch (error) {
+            this.transcript.error(`Failed to start a new session: ${errorMessage(error)}`);
+            this.sessionPickerOpen = false;
+            this.sessionPickerResolve?.();
+            this.paint();
+        }
     }
     handleProviderPickerKey(event) {
         if (this.providerEndpointMode) {

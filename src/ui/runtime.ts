@@ -30,6 +30,10 @@ export interface ChatRuntime {
   rebuild(changes: RebuildChanges): Promise<RebuildResult>;
   listSessions(): Promise<SessionMeta[]>;
   loadSession(id: string): Promise<Session>;
+  /** Create a fresh, unsaved session using the current provider and model. */
+  createSession(): Promise<Session>;
+  /** Permanently delete a saved session file. */
+  deleteSession(id: string): Promise<void>;
   /** List available providers including custom presets. */
   listProviders(): Promise<Array<{ id: string; model: string; baseURL?: string; keyEnv?: string; contextTokens?: number; site?: string }>>;
   /** Fetch model ids for a provider, using current in-memory credentials. */
