@@ -651,6 +651,13 @@ export function composeFrame(input: FrameInput): Frame {
   if (bodyHeight < 1) bodyHeight = 1;
 
   const lines: string[] = [];
+  // Prepend a clickable sessions toggle row at the top-left so every subsequent
+  // row index (chatStart, composerStartRow, …) naturally accounts for it.
+  if (input.sessionTab) {
+    const toggleRow = input.sessionTab.open ? "▾ Sessions" : "☰ Sessions";
+    const paddedToggle = color.dim(padToWidth(" " + toggleRow, width - 1));
+    lines.push(paddedToggle);
+  }
   if (showHeader && bordered) {
     lines.push(headerLine(input.header, width));
     lines.push("");
@@ -713,13 +720,6 @@ export function composeFrame(input: FrameInput): Frame {
   for (let index = 0; index < bottomGap; index++) lines.push("");
 
   while (lines.length < height - 1) lines.push("");
-
-  // Prepend a clickable sessions toggle row at the top-left.
-  if (input.sessionTab) {
-    const toggleRow = input.sessionTab.open ? "▾ Sessions" : "☰ Sessions";
-    const paddedToggle = color.dim(padToWidth(" " + toggleRow, width - 1));
-    lines.unshift(paddedToggle);
-  }
 
   // Hint footer lives outside the interface, pinned to the bottom edge.
   lines.push(color.dim(truncateWidth(COMPOSER_FOOTER, width)));
