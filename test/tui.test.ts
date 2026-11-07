@@ -353,8 +353,8 @@ describe("composeFrame", () => {
     const closed = frame({ showHeader: false, sessionTab: { open: false } });
     const open = frame({ showHeader: false, sessionTab: { open: true } });
 
-    assert.match(plain(closed.lines[0] ?? ""), /^ ☰ Sessions/);
-    assert.match(plain(open.lines[0] ?? ""), /^ ▾ Sessions/);
+    assert.match(plain(closed.lines[0] ?? ""), /^</);
+    assert.match(plain(open.lines[0] ?? ""), /^</);
     assert.equal(closed.bodyHeight, base.bodyHeight - 1, "the toggle reserves one chrome row");
     assert.equal(closed.lines.length, 24);
     for (const line of closed.lines) assert.ok(stringWidth(line) <= 80, line);

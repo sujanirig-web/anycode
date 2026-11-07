@@ -654,8 +654,9 @@ export function composeFrame(input: FrameInput): Frame {
   // Prepend a clickable sessions toggle row at the top-left so every subsequent
   // row index (chatStart, composerStartRow, …) naturally accounts for it.
   if (input.sessionTab) {
-    const toggleRow = input.sessionTab.open ? "▾ Sessions" : "☰ Sessions";
-    const paddedToggle = color.dim(padToWidth(" " + toggleRow, width - 1));
+    // A single chevron toggle in the top-left corner; tapping it shows/hides
+    // the sessions picker overlay. Label stays `<` so the button is stable.
+    const paddedToggle = color.dim(padToWidth("<", width - 1));
     lines.push(paddedToggle);
   }
   if (showHeader && bordered) {
