@@ -220,7 +220,9 @@ export class Tui {
         for (const event of events) {
             if (event.type === "mouse") {
                 // Left click on the top row toggles the sessions picker.
-                if (event.button === 0 && event.y === 1)
+                // Only toggle on button press (M), not release (m), otherwise a
+                // single click opens and immediately closes the picker.
+                if (event.button === 0 && event.y === 1 && !event.release)
                     this.toggleSessionPicker();
                 continue;
             }
@@ -959,7 +961,7 @@ export class Tui {
     }
     /** Handle a parsed mouse event; used by the TUI to hit-test the toggle. */
     handleMouse(event: { type: "mouse"; button: number; x: number; y: number; release: boolean }): boolean {
-        if (event.button === 0 && event.y === 1) {
+        if (event.button === 0 && event.y === 1 && !event.release) {
             this.toggleSessionPicker();
             return true;
         }

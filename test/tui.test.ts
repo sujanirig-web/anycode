@@ -1063,6 +1063,22 @@ describe("Tui session picker", () => {
     assert.equal(handled, false);
     assert.equal(tui.sessionPickerOpen, false);
   });
+
+  it("toggles on mouse press but not on release", () => {
+    const tui = makeTui();
+
+    // Button press opens the picker.
+    assert.equal(tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: false }), true);
+    assert.equal(tui.sessionPickerOpen, true);
+
+    // Button release must not immediately close it again.
+    assert.equal(tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: true }), false);
+    assert.equal(tui.sessionPickerOpen, true);
+
+    // A second press closes it.
+    assert.equal(tui.handleMouse({ type: "mouse", button: 0, x: 3, y: 1, release: false }), true);
+    assert.equal(tui.sessionPickerOpen, false);
+  });
 });
 
 describe("Tui jump to latest", () => {
