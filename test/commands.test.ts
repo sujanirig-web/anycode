@@ -63,3 +63,85 @@ describe("provider picker commands", () => {
     assert.match(errors[0] ?? "", /active provider/);
   });
 });
+
+describe("extension commands", () => {
+  it("lists MCP servers and their tool counts", async () => {
+    const info: string[] = [];
+    const host = {
+      extensionStatus: () => ({
+        mcpServers: [
+          { name: "github", status: "ready", toolCount: 2 },
+          { name: "off", status: "disabled", toolCount: 0 },
+          { name: "bad", status: "error", toolCount: 0, error: "boom" },
+        ],
+        plugins: [],
+        tools: [],
+      }),
+    } as unknown as CommandHost;
+    const sink: CommandSink = {
+      info: (message) => info.push(message),
+      error: () => undefined,
+    };
+
+    await handleSlashCommand("/mcp", host, {} as ChatState, sink);
+    const text = info.join("\n");
+    assert.match(text, /github · 2 tools/);
+    assert.match(text, /off · disabled/);
+    assert.match(text, /bad · error/);
+    assert.match(text, /boom/);
+  });
+
+  it("explains how to configure MCP when nothing is loaded", async () => {
+    const info: string[] = [];
+    const host = { extensionStatus: () => ({ mcpServers: [], plugins: [], tools: [] }) } as unknown as CommandHost;
+    const sink: CommandSink = { info: (message) => info.push(message), error: () => undefined };
+
+    await handleSlashCommand("/mcp", host, {} as ChatState, sink);
+
+    assert.match(info[0] ?? "", /No MCP servers configured/);
+  });
+
+  it("lists plugins and their registrations", async () => {
+    const info: string[] = [];
+    const host = {
+      extensionStatus: () => ({
+        mcpServers: [],
+        plugins: [
+          {
+            name: "deploy",
+            path: "/tmp/deploy.mjs",
+            tools: ["ship"],
+            commands: ["deploy"],
+            logs: [],
+          },
+        ],
+        tools: [{ name: "ship", source: "plugin" as const, description: "Ship", readOnly: false }],
+      }),
+    } as unknown as CommandHost;
+    const sink: CommandSink = { info: (message) => info.push(message), error: () => undefined };
+
+    await handleSlashCommand("/plugins", host, {} as ChatState, sink);
+    const text = info.join("\n");
+    assert.match(text, /deploy/);
+    assert.match(text, /tools: ship/);
+    assert.match(text, /commands: \/deploy/);
+  });
+
+  it("dispatches plugin slash commands with their arguments", async () => {
+    const calls: Array<{ name: string; args: string }> = [];
+    const host = {
+      pluginCommands: () => [{ name: "deploy", desc: "Deploy" }],
+      runPluginCommand: async (name: string, args: string) => {
+        calls.push({ name, args });
+        return `deployed ${args}`;
+      },
+    } as unknown as CommandHost;
+    const info: string[] = [];
+    const sink: CommandSink = { info: (message) => info.push(message), error: () => undefined };
+
+    await handleSlashCommand("/deploy staging", host, {} as ChatState, sink);
+
+    assert.deepEqual(calls, [{ name: "deploy", args: "staging" }]);
+    assert.equal(info[0], "deployed staging");
+  });
+});

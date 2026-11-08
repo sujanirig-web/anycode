@@ -12,5 +12,17 @@ export type { Config } from "./config.js";
 export { createProvider, AnthropicProvider, OpenAIProvider, MockProvider } from "./llm/index.js";
 export { builtinTools, findTool } from "./tools/index.js";
 export type { Tool, ToolContext, PermissionRequest } from "./tools/index.js";
+export { loadExtensions } from "./extensions.js";
+export type { ExtensionStatus, ExtensionToolInfo, LoadedExtensions } from "./extensions.js";
+export { loadMcpConfig, loadMcpServers, mcpConfigPaths } from "./mcp/index.js";
+export type { McpServerConfig, McpServerStatus } from "./mcp/index.js";
+export { loadPlugins, pluginDirs } from "./plugins/index.js";
+export type {
+  LoadedPlugins,
+  PluginApi,
+  PluginCommand,
+  PluginCommandContext,
+  PluginStatus,
+} from "./plugins/index.js";
 export type { Message, ToolCall, Usage, Provider } from "./types.js";
 export { VERSION, NAME } from "./version.js";

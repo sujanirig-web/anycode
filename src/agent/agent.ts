@@ -38,6 +38,8 @@ export interface AgentOptions {
   contextTokens?: number;
   /** Force the model to call at least one tool on user-message turns. */
   toolChoice?: "required" | "none" | "auto";
+  /** Observe every agent event (used by plugins). Errors are ignored. */
+  onEvent?: (event: AgentEvent) => void | Promise<void>;
   approve: (request: PermissionRequest) => Promise<boolean>;
 }
 
@@ -53,6 +55,7 @@ export class Agent {
   private readonly temperature: number | undefined;
   private readonly contextTokens: number;
   private readonly toolChoice: "required" | "none" | "auto";
+  private readonly onEvent: ((event: AgentEvent) => void | Promise<void>) | undefined;
   private readonly approve: (request: PermissionRequest) => Promise<boolean>;
 
   constructor(private readonly options: AgentOptions) {
@@ -75,6 +78,7 @@ export class Agent {
     this.temperature = options.temperature;
     this.contextTokens = options.contextTokens ?? 200_000;
     this.toolChoice = options.toolChoice ?? "auto";
+    this.onEvent = options.onEvent;
     this.approve = options.approve;
   }
 
@@ -110,9 +114,26 @@ export class Agent {
 
   /**
    * Run one user turn to completion, yielding normalized events as the model
-   * thinks, speaks and calls tools. The session is saved after every step.
+   * thinks, speaks and calls tools. Observers (plugins) see each event after it
+   * is produced; observer failures never interrupt the turn.
    */
   async *run(
+    userText: string,
+    runOptions: { signal?: AbortSignal } = {},
+  ): AsyncGenerator<AgentEvent> {
+    for await (const event of this.runInner(userText, runOptions)) {
+      if (this.onEvent) {
+        try {
+          await this.onEvent(event);
+        } catch {
+          // Hooks are observational; a broken plugin must not break a turn.
+        }
+      }
+      yield event;
+    }
+  }
+
+  private async *runInner(
     userText: string,
     runOptions: { signal?: AbortSignal } = {},
   ): AsyncGenerator<AgentEvent> {

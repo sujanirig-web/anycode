@@ -23,6 +23,8 @@ npm run dev -- "..." # run from source
 - Convert every provider into `ProviderEvent`; never branch on vendor in the agent.
 - Tools throw `ToolError(message, hint)` for recoverable failures so the model can retry.
 - Mutating tools must call `ctx.approve(request)` before touching the filesystem.
+- MCP tools that are not `readOnlyHint` and plugin tools that are not `readOnly`
+  must call `ctx.approve` too; never expose an unapproved mutating external tool.
 - After a successful mutation, call `ctx.onFileChange(change)` so the TUI can
   fold the diff into the live coding box and the REPL can print it immediately
   (include `diff`, `added`, and `removed` for text files).
@@ -38,7 +40,10 @@ npm run dev -- "..." # run from source
 - `src/tools/` — read/write/edit/bash/glob/grep/websearch
 - `src/ui/` — renderer, REPL, approval prompt
 - `src/util/` — ANSI, diff, glob, SSE, spinner, text
-- `test/` — unit, provider, agent, and CLI end-to-end tests
+- `src/mcp/` — stdio MCP config, JSON-RPC client, tool adapter
+- `src/plugins/` — ESM plugin loader, tools, commands, hooks
+- `src/extensions.ts` — combined MCP + plugin loading for the CLI
+- `test/` — unit, provider, agent, MCP/plugin, and CLI end-to-end tests
 
 ## Testing notes
 

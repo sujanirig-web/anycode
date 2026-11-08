@@ -32,6 +32,8 @@ export const COMMANDS: CommandItem[] = [
   { name: "yolo", desc: "Toggle auto-approve" },
   { name: "usage", desc: "Show token usage" },
   { name: "tools", desc: "List available tools" },
+  { name: "mcp", desc: "Show MCP server status" },
+  { name: "plugins", desc: "Show loaded plugins", args: "" },
   { name: "delete-provider", desc: "Delete a custom provider", args: "<id>" },
   { name: "exit", desc: "Quit", args: "" },
   { name: "quit", desc: "Quit", args: "" },
@@ -47,6 +49,8 @@ export const SLASH_HELP = `Commands
   /yolo              Toggle auto-approve for the rest of the session
   /usage             Show token usage for this session
   /tools             List available tools
+  /mcp               Show MCP server status
+  /plugins [name]    Show loaded plugins (or one plugin's log)
   /delete-provider <id> Delete a custom provider
   /exit              Quit (alias: /quit)
 
@@ -176,6 +180,69 @@ export async function handleSlashCommand(
       for (const tool of builtinTools) {
         sink.info(`${tool.name.padEnd(6)} ${tool.readOnly ? "(read-only)" : ""}`);
       }
+      const external = host.extensionStatus?.().tools ?? [];
+      if (external.length > 0) {
+        sink.info("External tools:");
+        for (const tool of external) {
+          sink.info(
+            `  ${tool.name.padEnd(6)} ${tool.source}${tool.readOnly ? ", read-only" : ""}`,
+          );
+        }
+      }
+      return false;
+    }
+
+    case "mcp": {
+      const servers = host.extensionStatus?.().mcpServers ?? [];
+      if (servers.length === 0) {
+        sink.info(
+          "No MCP servers configured. Add them to ~/.anycode/mcp.json or .anycode/mcp.json.",
+        );
+        return false;
+      }
+      for (const server of servers) {
+        const icon = server.status === "ready" ? "✓" : server.status === "disabled" ? "–" : "✗";
+        const detail =
+          server.status === "ready"
+            ? `${server.toolCount} tool${server.toolCount === 1 ? "" : "s"}`
+            : server.status;
+        sink.info(`${icon} ${server.name} · ${detail}${server.error ? `\n   ${server.error}` : ""}`);
+      }
+      return false;
+    }
+
+    case "plugins": {
+      const plugins = host.extensionStatus?.().plugins ?? [];
+      if (plugins.length === 0) {
+        sink.info(
+          "No plugins loaded. Drop .mjs files in ~/.anycode/plugins or .anycode/plugins.",
+        );
+        return false;
+      }
+      if (argument) {
+        const plugin = plugins.find((entry) => entry.name === argument);
+        if (!plugin) {
+          sink.error(`No plugin named '${argument}'.`);
+          return false;
+        }
+        const logs = plugin.logs.slice(-20);
+        sink.info(`${plugin.name} — ${plugin.path}`);
+        for (const line of logs.length > 0 ? logs : ["(no log messages)"]) {
+          sink.info(`  ${line}`);
+        }
+        return false;
+      }
+      for (const plugin of plugins) {
+        const facts = [
+          ...(plugin.tools.length > 0 ? [`tools: ${plugin.tools.join(", ")}`] : []),
+          ...(plugin.commands.length > 0
+            ? [`commands: ${plugin.commands.map((name) => `/${name}`).join(", ")}`]
+            : []),
+        ];
+        sink.info(
+          `${plugin.error ? "✗" : "✓"} ${plugin.name}${facts.length > 0 ? ` · ${facts.join(" · ")}` : ""}${plugin.error ? `\n   ${plugin.error}` : ""}`,
+        );
+      }
       return false;
     }
 
@@ -208,8 +275,21 @@ export async function handleSlashCommand(
       return false;
     }
 
-    default:
+    default: {
+      const plugin = host
+        .pluginCommands?.()
+        .find((entry) => entry.name === command.toLowerCase());
+      if (plugin && host.runPluginCommand) {
+        try {
+          const message = await host.runPluginCommand(plugin.name, argument, state);
+          if (message) sink.info(String(message));
+        } catch (error) {
+          sink.error(errorMessage(error));
+        }
+        return false;
+      }
       sink.info(`Unknown command /${command}. Try /help.`);
       return false;
+    }
   }
 }

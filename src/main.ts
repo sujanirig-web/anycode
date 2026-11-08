@@ -9,11 +9,13 @@ import { createSystemPrompt } from "./agent/prompt.js";
 import { Session, deleteSession, latestSession, listSessions } from "./agent/session.js";
 import { defaultBaseURLFor, loadConfig, saveGlobalConfig, saveProviderPreset, listConfiguredProviders, type Config, type ConfigOverrides } from "./config.js";
 import { UserError, errorMessage } from "./errors.js";
+import { loadExtensions } from "./extensions.js";
 import { createProvider } from "./llm/index.js";
 import { fetchModelIds } from "./llm/models.js";
 import { color } from "./util/ansi.js";
 import { Spinner } from "./util/spinner.js";
 import { oneLine } from "./util/text.js";
+import { builtinTools } from "./tools/index.js";
 import { createAskPermission } from "./ui/ask.js";
 import { Renderer } from "./ui/renderer.js";
 import { Tui } from "./ui/tui.js";
@@ -80,6 +82,12 @@ Examples:
 Config files (later wins):
   ~/.anycode/config.json
   ./.anycode/config.json
+
+Extensions:
+  ~/.anycode/mcp.json          Global MCP servers (stdio)
+  ./.anycode/mcp.json          Project MCP servers
+  ~/.anycode/plugins/*.mjs     Global plugins
+  ./.anycode/plugins/*.mjs     Project plugins
 `;
 
 function toPositiveInt(value: string | undefined, flag: string): number | undefined {
@@ -244,6 +252,12 @@ export async function main(argv: string[]): Promise<number> {
   }
 
   const broker = new PermissionBroker(config.autoApprove);
+
+  // MCP servers and plugins are optional. With no config this is a couple of
+  // failed file reads; otherwise servers start in parallel.
+  const extensions = await loadExtensions(cwd);
+  process.once("exit", () => extensions.disposeSync());
+
   const providerApiKeys = new Map<string, string>();
   const providerBaseURLs = new Map<string, string>();
   if (config.apiKey) providerApiKeys.set(config.provider, config.apiKey);
@@ -273,7 +287,7 @@ export async function main(argv: string[]): Promise<number> {
       ...(effective.apiKey ? { apiKey: effective.apiKey } : {}),
       ...(effective.baseURL ? { baseURL: effective.baseURL } : {}),
     });
-    const system = await createSystemPrompt(cwd, providerId, model);
+    const system = await createSystemPrompt(cwd, providerId, model, extensions.prompt);
     forSession.provider = providerId;
     forSession.model = model;
 
@@ -283,17 +297,27 @@ export async function main(argv: string[]): Promise<number> {
       cwd,
       session: forSession,
       system,
+      tools: [...builtinTools, ...extensions.tools],
       maxSteps: effective.maxSteps,
       maxTokens: effective.maxTokens,
       contextTokens: effective.contextTokens,
       ...(effective.temperature !== undefined ? { temperature: effective.temperature } : {}),
+      ...(extensions.hasHooks
+        ? { onEvent: (event) => extensions.emit(event, forSession) }
+        : {}),
       approve: (request) => broker.approve(request),
     });
 
     return { agent, config: effective };
   };
 
-  const built = await build(session, config.provider, config.model);
+  let built: Awaited<ReturnType<typeof build>>;
+  try {
+    built = await build(session, config.provider, config.model);
+  } catch (error) {
+    await extensions.close();
+    throw error;
+  }
   const agent = built.agent;
   const effectiveConfig = built.config;
 
@@ -364,6 +388,15 @@ export async function main(argv: string[]): Promise<number> {
         // Implemented per-mode below (TUI vs REPL).
         throw new Error("Model picker not available in this mode.");
       },
+      extensionStatus: () => extensions.status,
+      pluginCommands: () => extensions.pluginCommands(),
+      runPluginCommand: (name, args, state) =>
+        extensions.runCommand(name, args, {
+          cwd,
+          session: state.session,
+          providerId: state.providerId,
+          model: state.model,
+        }),
     };
 
     if (useTui) {
@@ -371,9 +404,17 @@ export async function main(argv: string[]): Promise<number> {
       runtime.showModelPicker = tui.showModelPicker.bind(tui);
       runtime.showProviderPicker = tui.showProviderPicker.bind(tui);
       runtime.showSessionPicker = tui.showSessionPicker.bind(tui);
-      await tui.run();
+      try {
+        await tui.run();
+      } finally {
+        await extensions.close();
+      }
     } else {
-      await runRepl(runtime);
+      try {
+        await runRepl(runtime);
+      } finally {
+        await extensions.close();
+      }
     }
     return 0;
   }
@@ -467,6 +508,7 @@ export async function main(argv: string[]): Promise<number> {
     renderer.endText();
     process.off("SIGINT", onSigint);
     rl?.close();
+    await extensions.close();
   }
 
   if (!jsonMode) renderer.usage(session.usage, before);

@@ -1,6 +1,7 @@
 import type { Agent } from "../agent/agent.js";
 import type { PermissionBroker } from "../agent/permissions.js";
 import type { Session, SessionMeta } from "../agent/session.js";
+import type { ExtensionStatus } from "../extensions.js";
 
 export interface RebuildChanges {
   session?: Session;
@@ -40,6 +41,12 @@ export interface ChatRuntime {
   listModels(providerId: string): Promise<string[]>;
   /** Save a custom provider preset to the global config. */
   saveProvider(id: string, preset: { model?: string; baseURL?: string; keyEnv?: string; contextTokens?: number; site?: string }): Promise<void>;
+  /** MCP and plugin status for `/mcp` and `/plugins`. */
+  extensionStatus?(): ExtensionStatus;
+  /** Slash commands contributed by plugins. */
+  pluginCommands?(): Array<{ name: string; desc: string }>;
+  /** Run a plugin command, returning an optional message to print. */
+  runPluginCommand?(name: string, args: string, state: ChatState): Promise<string | void>;
   /** Open the interactive model picker (TUI only). */
   showModelPicker?(): Promise<void>;
   /** Open the interactive provider picker (TUI only). */

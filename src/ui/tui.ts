@@ -499,7 +499,8 @@ export class Tui {
     /** Commands matching the current palette filter. */
     filteredCommands() {
         const f = this.paletteFilter.slice(1).toLowerCase(); // strip leading "/"
-        return COMMANDS.filter((c) => c.name.includes(f) || c.desc.toLowerCase().includes(f));
+        const pluginCommands = this.runtime.pluginCommands?.() ?? [];
+        return [...COMMANDS, ...pluginCommands].filter((c) => c.name.includes(f) || c.desc.toLowerCase().includes(f));
     }
     /** Execute the currently selected palette item. */
     selectPaletteItem() {

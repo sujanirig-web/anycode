@@ -70,6 +70,10 @@ anycode v0.2.0 ─────────────────────�
   injected into the system prompt automatically.
 - **Context trimming** — long histories are compacted at user-turn boundaries so
   tool calls and results stay paired.
+- **MCP servers** — connect stdio [Model Context Protocol](https://modelcontextprotocol.io)
+  servers from `mcp.json`; their tools appear to the model as `mcp__<server>__<tool>`.
+- **Plugins** — drop ESM files into `.anycode/plugins/` to add tools, slash
+  commands, and turn/tool hooks.
 - **Library surface** — import `Agent`, tools, providers, and session storage to
   embed the loop in another program.
 
@@ -284,6 +288,8 @@ Slash commands:
 /yolo              Toggle auto-approve for the rest of the session
 /usage             Show token usage
 /tools             List available tools
+/mcp               Show MCP server status
+/plugins [name]    Show loaded plugins (or one plugin's log)
 /exit              Quit (alias: /quit)
 ```
 
@@ -337,6 +343,86 @@ Example `.anycode/config.json`:
 Set `ANYCODE_HOME` to relocate the global config directory (useful for tests
 and sandboxes). `anycode config` prints the effective values with the API key
 masked.
+
+### MCP servers
+
+anycode speaks MCP over stdio (newline-delimited JSON-RPC 2.0). Configure
+servers in `~/.anycode/mcp.json` (global) and/or `<cwd>/.anycode/mcp.json`
+(project). Project entries replace global entries with the same name.
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/me/project"],
+      "env": { "TOKEN": "..." },
+      "timeoutMs": 60000
+    },
+    "disabled-example": { "command": "some-server", "disabled": true }
+  }
+}
+```
+
+- Each MCP tool becomes `mcp__<server>__<tool>` (unsafe characters become `_`).
+- Servers start once at startup, in parallel. A broken server is reported by
+  `/mcp` and never blocks startup or other servers.
+- Tools that are not marked `readOnlyHint` ask for approval like other mutating
+  tools. `--yolo` skips prompts.
+- `cwd` is resolved relative to the project directory; `env` is merged over the
+  current environment. `timeoutMs` defaults to 60 seconds per request.
+
+### Plugins
+
+anycode loads `*.mjs` / `*.js` files from `~/.anycode/plugins/` and
+`<cwd>/.anycode/plugins/` once at startup. A plugin default-exports a function
+(or an object with `setup`/`activate`) that receives the plugin API.
+
+```js
+export default function (api) {
+  api.registerTool({
+    name: "deploy",
+    description: "Deploy the current branch",
+    parameters: {
+      type: "object",
+      properties: { env: { type: "string" } },
+      required: ["env"],
+    },
+    async execute(input, ctx) {
+      const ok = await ctx.approve({
+        tool: "deploy",
+        kind: "plugin",
+        title: `Deploy to ${input.env}`,
+      });
+      if (!ok) throw new Error("deploy denied");
+      return `deployed to ${input.env}`;
+    },
+  });
+
+  api.registerCommand({
+    name: "deploy-status",
+    description: "Show deploy status",
+    run(args, context) {
+      context.log(`status requested for ${args || "staging"}`);
+      return `status: ${args || "staging"}`;
+    },
+  });
+
+  api.on("tool_end", ({ event }) => api.log(`ran ${event.call.name}`));
+  api.onCleanup(() => {
+    // close connections, flush files, ...
+  });
+}
+```
+
+- `api.registerTool` adds a tool the model can call. Set `readOnly: true` when it
+  never mutates state; otherwise call `ctx.approve` yourself.
+- `api.registerCommand` adds a slash command. Plugin commands appear in the
+  command palette and `/plugins`; built-in commands win on name collisions.
+- Hooks: `turn_start`, `turn_end`, `tool_start`, `tool_end`. Hook errors are
+  recorded in the plugin log and never interrupt a turn.
+- Plugin tools that collide with built-in or MCP tool names are ignored.
+- `api.log` lines are visible with `/plugins <name>`.
 
 ### Project rules
 
